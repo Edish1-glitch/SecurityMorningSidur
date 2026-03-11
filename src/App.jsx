@@ -43,15 +43,28 @@ function consec(h, g, sched) {
 function cicoLimit(gIdx, guards) {
   const g = guards[gIdx];
   const achmashCount = guards.filter(x => x.level === "achmash").length;
-  // When 2+ achmash present, each achmash does 1 CICO for fairness
-  if (g.level === "achmash") return achmashCount >= 2 ? 1 : 0;
-  const hasAchmash = guards.some(x => x.level === "achmash" && !x.isGate);
+  const nonAchmash = guards.filter(x => x.level !== "achmash");
+  const nonAchmashCount = nonAchmash.length;
+
+  if (g.level === "achmash") {
+    // Achmash can do CICO only when non-achmash guards can't cover all 7 slots
+    if (nonAchmashCount === 0) return Math.ceil(7 / achmashCount);
+    const nonAchmashCapacity = nonAchmash.reduce((sum, _, i) => {
+      const realIdx = guards.indexOf(nonAchmash[i]);
+      const isGate = guards[realIdx].isGate;
+      const cap = isGate ? 2 : (guards[realIdx].level === "strong" ? 1 : 2);
+      return sum + cap;
+    }, 0);
+    const deficit = Math.max(0, 7 - nonAchmashCapacity);
+    if (deficit === 0) return 0;
+    return Math.ceil(deficit / achmashCount);
+  }
+
+  const hasAchmash = achmashCount > 0;
   if (g.isGate) return hasAchmash ? 2 : 1;
   if (hasAchmash) {
-    // If 2+ achmash also do CICO, distribute among all non-gate guards
-    const eligible = guards.filter(x => !x.isGate).length;
-    if (eligible === 0) return 0;
-    return Math.ceil(7 / eligible);
+    if (nonAchmashCount === 0) return 0;
+    return Math.ceil(7 / nonAchmashCount);
   }
   return g.level === "strong" ? 1 : 2;
 }
@@ -103,7 +116,7 @@ function validateSched(sched, guards) {
     const cc = row.filter(s => s === "cico").length;
     const lim = cicoLimit(g, guards);
     if (cc > lim) errs.push(`${gName}: ${cc} CICO (מקס׳ ${lim})`);
-    if (guard.isDouble && row[7] !== "cico")
+    if (guard.isDouble && guard.level !== "achmash" && row[7] !== "cico")
       errs.push(`${gName}: כפולה חייב CICO בשעה האחרונה`);
     for (let h = 0; h < 7; h++) {
       if (row[h] === "malshinon" && row[h + 1] === "malshinon")
@@ -216,44 +229,82 @@ function tryGen(seed, guards) {
     });
     if (cands.length) sched[h][cands[0]] = "malshinon";
   }
+  // Fill remaining empty slots: prefer malshinon where valid, else break.
+  // Never assign break if another guard already has break that hour.
+  // Never assign malshinon if another guard already has malshinon that hour.
   for (let h = 0; h < 8; h++) {
     for (let g = 0; g < N; g++) {
-      if (!sched[h][g]) {
-        // Prefer malshinon over break to avoid two consecutive breaks
-        const prevIsBreak = h > 0 && sched[h - 1][g] === "break";
-        const malshinonOk = prevIsBreak &&
-          assignable(h).includes("malshinon") &&
-          !sched[h].some((s, gi) => gi !== g && s === "malshinon") &&
-          !(h > 0 && sched[h - 1][g] === "malshinon");
-        sched[h][g] = malshinonOk ? "malshinon" : "break";
+      if (sched[h][g]) continue;
+      const hourBreakTaken = sched[h].some((s, gi) => gi !== g && s === "break");
+      const hourMalsTaken  = sched[h].some((s, gi) => gi !== g && s === "malshinon");
+      const prevMals       = h > 0 && sched[h - 1][g] === "malshinon";
+      const prevBreak      = h > 0 && sched[h - 1][g] === "break";
+      const nextMals       = h < 7 && sched[h + 1][g] === "malshinon";
+      const malsValid = (h === 0 || h >= 3) && !prevMals && !nextMals && !hourMalsTaken;
+      if (malsValid && prevBreak) {
+        // Prefer malshinon after a break to avoid consecutive breaks
+        sched[h][g] = "malshinon";
+      } else if (!hourBreakTaken && !prevBreak) {
+        sched[h][g] = "break";
+      } else if (malsValid) {
+        sched[h][g] = "malshinon";
+      } else {
+        sched[h][g] = "break";
       }
     }
   }
   return sched;
 }
 function postFix(sched, guards) {
-  for (let iter = 0; iter < 10; iter++) {
+  for (let iter = 0; iter < 20; iter++) {
     let improved = false;
     const errs = validateSched(sched, guards);
     if (!errs.length) break;
-    for (let g = 0; g < guards.length; g++) {
-      for (const need of ["lenel", "bosh", "malshinon", "cico", "break"]) {
+
+    // Pass 1: assign missing required stations per guard
+    const achmashCount = guards.filter(x => x.level === "achmash").length;
+    for (let g = 0; g < guards.length && !improved; g++) {
+      const needed = guards[g].level === "achmash"
+        ? (achmashCount >= 2 ? ["lenel", "bosh", "malshinon", "break", "cico"] : ["lenel", "bosh", "malshinon", "break"])
+        : guards[g].isGate
+          ? ["cico"]
+          : ["lenel", "bosh", "malshinon", "cico", "break"];
+      for (const need of needed) {
         if (sched.map(r => r[g]).includes(need)) continue;
         for (let h = 0; h < 8; h++) {
           const cur = sched[h][g];
           if (cur === "shaar" || cur === need) continue;
           sched[h][g] = need;
-          if (canPlaceFix(h, g, need, sched, guards)) {
-            if (validateSched(sched, guards).length <= errs.length) { improved = true; break; }
+          if (canPlaceFix(h, g, need, sched, guards) &&
+              validateSched(sched, guards).length < errs.length) {
+            improved = true; break;
           }
           sched[h][g] = cur;
         }
         if (improved) break;
       }
-      if (improved) break;
     }
-    // Swap to fix rest-limit violations: trade a rest slot from an over-rested guard
-    // with an active slot from a guard who can absorb a break.
+
+    // Pass 2: fix simultaneous breaks — swap break with another rest type
+    for (let h = 0; h < 8 && !improved; h++) {
+      const breakGuards = sched[h].map((s, gi) => gi).filter(gi => sched[h][gi] === "break");
+      if (breakGuards.length <= 1) continue;
+      // Try to swap extra break-holders to malshinon
+      for (let k = 1; k < breakGuards.length && !improved; k++) {
+        const g = breakGuards[k];
+        if (sched[h][g] === "shaar") continue;
+        const prev = sched[h][g];
+        sched[h][g] = "malshinon";
+        if (canPlaceFix(h, g, "malshinon", sched, guards) &&
+            validateSched(sched, guards).length < errs.length) {
+          improved = true;
+        } else {
+          sched[h][g] = prev;
+        }
+      }
+    }
+
+    // Pass 3: fix rest-limit violations via swap
     for (let g = 0; g < guards.length && !improved; g++) {
       const restCnt = sched.map(r => r[g]).filter(s => s === "break" || s === "malshinon").length;
       if (restCnt <= 3) continue;
@@ -263,40 +314,58 @@ function postFix(sched, guards) {
         for (let g2 = 0; g2 < guards.length && !improved; g2++) {
           if (g2 === g) continue;
           const st2 = sched[h][g2];
-          if (!st2 || REST.has(st2)) continue;           // g2 must hold an active station
+          if (!st2 || REST.has(st2)) continue;
           const rested2 = sched.map(r => r[g2]).filter(s => s === "break" || s === "malshinon").length;
-          if (rested2 >= 3) continue;                    // g2 can't afford another rest
+          if (rested2 >= 3) continue;
           sched[h][g]  = st2;
           sched[h][g2] = curSt;
           if (validateSched(sched, guards).length < errs.length) { improved = true; break; }
-          sched[h][g]  = curSt;                          // revert
+          sched[h][g]  = curSt;
           sched[h][g2] = st2;
         }
       }
     }
-    // Fix consecutive breaks: try replacing one of the two with malshinon
+    // Pass 4: fix consecutive breaks — replace one with malshinon
     for (let g = 0; g < guards.length && !improved; g++) {
       for (let h = 1; h < 8 && !improved; h++) {
         if (sched[h][g] !== "break" || sched[h - 1][g] !== "break") continue;
-        // Try replacing hour h with malshinon
         if (assignable(h).includes("malshinon") &&
             !sched[h].some((s, gi) => gi !== g && s === "malshinon") &&
             !(h < 7 && sched[h + 1][g] === "malshinon")) {
           sched[h][g] = "malshinon";
           if (validateSched(sched, guards).length < errs.length) { improved = true; break; }
-          sched[h][g] = "break"; // revert
+          sched[h][g] = "break";
         }
-        // Try replacing hour h-1 with malshinon
         if (!improved &&
             assignable(h - 1).includes("malshinon") &&
             !sched[h - 1].some((s, gi) => gi !== g && s === "malshinon") &&
             !(h > 1 && sched[h - 2][g] === "malshinon")) {
           sched[h - 1][g] = "malshinon";
           if (validateSched(sched, guards).length < errs.length) { improved = true; break; }
-          sched[h - 1][g] = "break"; // revert
+          sched[h - 1][g] = "break";
         }
       }
     }
+
+    // Pass 5: generic pairwise swap — try any two cells in same hour
+    for (let h = 0; h < 8 && !improved; h++) {
+      for (let g = 0; g < guards.length && !improved; g++) {
+        for (let g2 = g + 1; g2 < guards.length && !improved; g2++) {
+          const s1 = sched[h][g], s2 = sched[h][g2];
+          if (!s1 || !s2 || s1 === s2) continue;
+          if (s1 === "shaar" || s2 === "shaar") continue;
+          sched[h][g] = s2; sched[h][g2] = s1;
+          if (canPlaceFix(h, g, s2, sched, guards) &&
+              canPlaceFix(h, g2, s1, sched, guards) &&
+              validateSched(sched, guards).length < errs.length) {
+            improved = true;
+          } else {
+            sched[h][g] = s1; sched[h][g2] = s2;
+          }
+        }
+      }
+    }
+
     if (!improved) break;
   }
 }
