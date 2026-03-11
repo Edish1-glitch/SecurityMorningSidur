@@ -480,55 +480,77 @@ function CellEditModal({ visible, hour, guardIdx, guards, onSelect, onClose }) {
 // ─── Fullscreen Table ─────────────────────────────────────────────────────────
 function FullscreenTable({ sched, guards, onClose }) {
   return (
-    <div className="fixed inset-0 z-50 flex flex-col" style={{ backgroundColor: "#0d1117" }}>
-      <div className="flex items-center justify-between p-3" style={{ direction: "rtl" }}>
-        <span className="font-extrabold text-sm" style={{ color: "#f0a500" }}>📋 טבלת השיבוץ</span>
+    <div
+      className="fixed inset-0 z-50 flex flex-col"
+      style={{ backgroundColor: "#0d1117", height: "100dvh", width: "100dvw" }}
+    >
+      {/* Compact header */}
+      <div
+        className="flex items-center justify-between px-3 py-1.5 flex-shrink-0"
+        style={{ direction: "rtl", borderBottom: "1px solid #30363d" }}
+      >
+        <span className="font-extrabold text-xs" style={{ color: "#f0a500" }}>📋 טבלת השיבוץ</span>
         <button
-          className="w-8 h-8 rounded-full flex items-center justify-center font-black text-white"
+          className="w-7 h-7 rounded-full flex items-center justify-center font-black text-white text-xs"
           style={{ backgroundColor: "#f85149" }}
           onClick={onClose}
         >✕</button>
       </div>
-      <Legend />
-      <div className="flex-1 overflow-auto p-2" style={{ direction: "rtl" }}>
-        <div style={{ minWidth: guards.length * 80 + 90 }}>
-          <div className="flex" style={{ borderBottom: "2px solid #30363d" }}>
-            <div className="flex-shrink-0 flex items-center justify-center py-2.5" style={{ width: 90, backgroundColor: "#1c2330" }}>
-              <span className="text-xs font-bold" style={{ color: "#8b949e" }}>שעות</span>
-            </div>
-            {guards.map((g, gi) => (
-              <div key={gi} className="flex-1 flex items-center justify-center py-2.5 min-w-0" style={{ backgroundColor: "#1c2330", borderRight: "1px solid #30363d" }}>
-                <span className="text-sm font-bold truncate px-1" style={{ color: "#e6edf3" }}>{guardDisplayName(g, gi, guards.length)}</span>
-              </div>
-            ))}
+
+      {/* Table — fills all remaining height, no scroll */}
+      <div className="flex-1 flex flex-col overflow-hidden" style={{ direction: "rtl" }}>
+        {/* Column headers */}
+        <div className="flex flex-shrink-0" style={{ borderBottom: "1px solid #30363d" }}>
+          <div
+            className="flex-shrink-0 flex items-center justify-center py-1"
+            style={{ width: 64, backgroundColor: "#1c2330" }}
+          >
+            <span className="text-xs font-bold" style={{ color: "#8b949e" }}>שעה</span>
           </div>
-          {HOURS.map((hr, h) => (
-            <div key={h} className="flex" style={{ borderBottom: "1px solid #21262d" }}>
-              <div className="flex-shrink-0 flex items-center justify-center py-2" style={{ width: 90, backgroundColor: "#1c2330" }}>
-                <span className="text-xs font-semibold" style={{ color: "#8b949e" }}>{hr}</span>
-              </div>
-              {guards.map((_, gi) => {
-                const cell = sched[h][gi];
-                const col = cell ? SC[cell] : null;
-                return (
-                  <div
-                    key={gi}
-                    className="flex-1 flex items-center justify-center m-1 rounded-lg"
-                    style={{
-                      minHeight: 46,
-                      backgroundColor: col ? col.bg : "transparent",
-                      border: `1px solid ${col ? col.border : "#30363d"}`,
-                    }}
-                  >
-                    <span className="text-sm font-bold" style={{ color: col ? col.text : "#8b949e" }}>
-                      {cell ? SL[cell] : "—"}
-                    </span>
-                  </div>
-                );
-              })}
+          {guards.map((g, gi) => (
+            <div
+              key={gi}
+              className="flex-1 flex items-center justify-center py-1 min-w-0"
+              style={{ backgroundColor: "#1c2330", borderRight: "1px solid #30363d" }}
+            >
+              <span className="font-bold truncate px-1" style={{ color: "#e6edf3", fontSize: 11 }}>
+                {guardDisplayName(g, gi, guards.length)}
+              </span>
             </div>
           ))}
         </div>
+
+        {/* Hour rows — each takes equal share of remaining height */}
+        {HOURS.map((hr, h) => (
+          <div key={h} className="flex flex-1" style={{ borderBottom: "1px solid #21262d" }}>
+            <div
+              className="flex-shrink-0 flex items-center justify-center"
+              style={{ width: 64, backgroundColor: "#1c2330" }}
+            >
+              <span className="font-semibold" style={{ color: "#8b949e", fontSize: 10 }}>
+                {hr.split("-")[0]}
+              </span>
+            </div>
+            {guards.map((_, gi) => {
+              const cell = sched[h][gi];
+              const col = cell ? SC[cell] : null;
+              return (
+                <div
+                  key={gi}
+                  className="flex-1 flex items-center justify-center m-0.5 rounded"
+                  style={{
+                    backgroundColor: col ? col.bg : "transparent",
+                    border: `1px solid ${col ? col.border : "#30363d"}`,
+                  }}
+                >
+                  <span className="font-bold text-center leading-tight px-0.5" style={{ color: col ? col.text : "#8b949e", fontSize: 10 }}>
+                    {cell ? SL[cell] : "—"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        ))}
       </div>
     </div>
   );
