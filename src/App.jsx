@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 // ─── Constants ────────────────────────────────────────────────────────────────
 const HOURS = [
   "07:00-08:00","08:00-09:00","09:00-10:00","10:00-11:00",
@@ -477,6 +477,82 @@ function CellEditModal({ visible, hour, guardIdx, guards, onSelect, onClose }) {
     </div>
   );
 }
+// ─── Export Table (rendered off-screen → PNG → share) ────────────────────────
+function ExportTable({ sched, guards }) {
+  const today = new Date().toLocaleDateString("he-IL", {
+    weekday: "long", year: "numeric", month: "long", day: "numeric",
+  });
+  const TOTAL_W = 560;
+  const TIME_W  = 68;
+  const colW    = Math.floor((TOTAL_W - TIME_W) / guards.length);
+  const cell = (s) => ({ width: colW, flexShrink: 0, padding: "3px" });
+
+  return (
+    <div style={{ width: TOTAL_W, backgroundColor: "#0d1117", padding: "20px",
+                  fontFamily: "Arial, Helvetica, sans-serif", direction: "rtl" }}>
+      {/* Title */}
+      <div style={{ textAlign: "center", marginBottom: "14px" }}>
+        <div style={{ color: "#f0a500", fontSize: "22px", fontWeight: "900", marginBottom: "6px" }}>
+          טבלת השיבוץ
+        </div>
+        <div style={{ color: "#8b949e", fontSize: "12px" }}>{today}</div>
+        <div style={{ color: "#8b949e", fontSize: "11px", marginTop: "2px" }}>משמרת בוקר 07:00–15:00</div>
+        <div style={{ width: "40px", height: "2px", backgroundColor: "#f0a500", margin: "10px auto 0" }} />
+      </div>
+
+      {/* Grid */}
+      <div style={{ borderRadius: "10px", overflow: "hidden", border: "1px solid #30363d" }}>
+        {/* Header row */}
+        <div style={{ display: "flex", backgroundColor: "#1c2330", borderBottom: "2px solid #30363d" }}>
+          <div style={{ width: TIME_W, flexShrink: 0, textAlign: "center", padding: "10px 4px",
+                        color: "#8b949e", fontSize: "12px", fontWeight: "bold" }}>שעה</div>
+          {guards.map((g, gi) => (
+            <div key={gi} style={{ width: colW, flexShrink: 0, textAlign: "center", padding: "10px 4px",
+                                   color: "#e6edf3", fontSize: "11px", fontWeight: "bold",
+                                   borderRight: "1px solid #30363d", overflow: "hidden" }}>
+              {guardDisplayName(g, gi, guards.length)}
+            </div>
+          ))}
+        </div>
+
+        {/* Hour rows */}
+        {HOURS.map((hr, h) => (
+          <div key={h} style={{ display: "flex", borderBottom: h < 7 ? "1px solid #21262d" : "none" }}>
+            <div style={{ width: TIME_W, flexShrink: 0, backgroundColor: "#1c2330",
+                          display: "flex", alignItems: "center", justifyContent: "center", padding: "4px" }}>
+              <span style={{ color: "#8b949e", fontSize: "11px", fontWeight: "600" }}>
+                {hr.split("-")[0]}
+              </span>
+            </div>
+            {guards.map((_, gi) => {
+              const st  = sched[h][gi];
+              const col = st ? SC[st] : null;
+              return (
+                <div key={gi} style={cell(st)}>
+                  <div style={{ height: "100%", display: "flex", alignItems: "center",
+                                justifyContent: "center", borderRadius: "6px",
+                                padding: "8px 2px", minHeight: "36px",
+                                backgroundColor: col ? col.bg : "transparent",
+                                border: `1px solid ${col ? col.border : "#30363d"}` }}>
+                    <span style={{ color: col ? col.text : "#8b949e",
+                                   fontSize: "11px", fontWeight: "bold" }}>
+                      {st ? SL[st] : "—"}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+
+      {/* Watermark */}
+      <div style={{ textAlign: "center", marginTop: "10px", color: "#30363d", fontSize: "10px" }}>
+        מנהל משמרות אבטחה · 07:00–15:00
+      </div>
+    </div>
+  );
+}
 // ─── Fullscreen Table ─────────────────────────────────────────────────────────
 function FullscreenTable({ sched, guards, onClose }) {
   return (
@@ -580,6 +656,8 @@ export default function App() {
   const [menuVisible, setMenuVisible] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [showRules, setShowRules] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const exportRef = useRef(null);
   const handleGenerate = useCallback(() => {
     setGenerating(true);
     setTimeout(() => {
@@ -594,6 +672,35 @@ export default function App() {
     setSelCell({ h, g });
     setMenuVisible(true);
   }, [guards]);
+  const handleShare = useCallback(async () => {
+    if (!exportRef.current || !sched) return;
+    setSharing(true);
+    try {
+      const html2canvas = (await import("html2canvas")).default;
+      const canvas = await html2canvas(exportRef.current, {
+        backgroundColor: "#0d1117",
+        scale: 2,
+        useCORS: true,
+        logging: false,
+      });
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+      const file = new File([blob], "sidur-avtaha.png", { type: "image/png" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: "טבלת השיבוץ" });
+      } else {
+        // Desktop fallback: download
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = "sidur-avtaha.png"; a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (err) {
+      if (err.name !== "AbortError") console.error("Share error:", err);
+    } finally {
+      setSharing(false);
+    }
+  }, [sched]);
+
   const handleSetCell = useCallback((st) => {
     if (!selCell || !sched) return;
     const { h, g } = selCell;
@@ -650,7 +757,7 @@ export default function App() {
         )}
         {/* Action buttons */}
         {sched && (
-          <div className="flex gap-2 mb-4" style={{ direction: "rtl" }}>
+          <div className="flex gap-2 mb-3" style={{ direction: "rtl" }}>
             <button
               className="flex-1 py-2.5 rounded-xl text-xs font-semibold transition-all active:scale-95"
               style={{ backgroundColor: "#1c2330", border: "1px solid #30363d", color: "#e6edf3" }}
@@ -667,6 +774,22 @@ export default function App() {
             </button>
           </div>
         )}
+        {/* Share button */}
+        {sched && (
+          <button
+            className="w-full py-3 rounded-xl text-sm font-extrabold mb-4 transition-all active:scale-95"
+            style={{
+              backgroundColor: sharing ? "#1a3a25" : "#25d366",
+              border: "1px solid #25d366",
+              color: "#fff",
+              opacity: sharing ? 0.8 : 1,
+            }}
+            onClick={handleShare}
+            disabled={sharing}
+          >
+            {sharing ? "⏳ מכין תמונה..." : "📤 שתף סידור"}
+          </button>
+        )}
       </div>
       {/* Cell Edit Modal */}
       <CellEditModal
@@ -680,6 +803,15 @@ export default function App() {
       {/* Fullscreen */}
       {sched && fullscreen && (
         <FullscreenTable sched={sched} guards={guards} onClose={() => setFullscreen(false)} />
+      )}
+      {/* Hidden export target — rendered off-screen for image generation */}
+      {sched && (
+        <div style={{ position: "fixed", top: "-9999px", left: "-9999px",
+                      zIndex: -1, pointerEvents: "none" }}>
+          <div ref={exportRef}>
+            <ExportTable sched={sched} guards={guards} />
+          </div>
+        </div>
       )}
     </div>
   );
