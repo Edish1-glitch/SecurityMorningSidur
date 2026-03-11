@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useMemo } from "react";
 // ─── Constants ────────────────────────────────────────────────────────────────
 const HOURS = [
   "07:00-08:00","08:00-09:00","09:00-10:00","10:00-11:00",
@@ -477,112 +477,167 @@ function CellEditModal({ visible, hour, guardIdx, guards, onSelect, onClose }) {
     </div>
   );
 }
-// ─── Export Table (rendered off-screen → PNG → share) ────────────────────────
-// html2canvas does NOT reliably render flexbox alignment — use lineHeight
-// for vertical centering and textAlign:center for horizontal centering instead.
-const EXPORT_W    = 820; // landscape width
-const EXPORT_TW   = 72;  // time column width
-const EXPORT_ROW  = 46;  // row height (px)
-const EXPORT_PAD  = 3;   // cell padding (px)
-const INNER_H     = EXPORT_ROW - EXPORT_PAD * 2; // inner colored div height
+// ─── Canvas Image Generator ───────────────────────────────────────────────────
+// Pure Canvas API — no html2canvas, no RTL/flex rendering bugs.
+// ctx.textAlign='center' + textBaseline='middle' always works correctly.
+function rrect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y,     x + w, y + r,     r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x,     y + h, x,     y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x,     y,     x + r, y,          r);
+  ctx.closePath();
+}
 
-function ExportTable({ sched, guards }) {
+function buildScheduleCanvas(sched, guards) {
+  const SCALE  = 2;           // retina quality
+  const W      = 840;
+  const PAD    = 20;
+  const TW     = 76;          // time column width
+  const ROW_H  = 46;          // hour row height
+  const HDR_H  = 38;          // guard-name header height
+  const CP     = 3;           // cell padding
+  const N      = guards.length;
+  const guardW = (W - 2 * PAD - TW) / N;
+
+  // Layout: time column on RIGHT (matching app RTL feel).
+  // Canvas draws LTR, so guard columns fill left, time column is last on right.
+  // Guard gi=0 (מאבטח 1) is closest to time → rightmost guard position.
+  const GRID_X  = PAD;
+  const TIME_X  = GRID_X + N * guardW;         // time column left edge
+  const GRID_W  = TW + N * guardW;
+  const GRID_Y  = PAD + 90;
+  const GRID_H  = HDR_H + 2 + ROW_H * 8;
+  const H       = GRID_Y + GRID_H + 36;
+
+  const canvas  = document.createElement("canvas");
+  canvas.width  = W * SCALE;
+  canvas.height = H * SCALE;
+  const ctx     = canvas.getContext("2d");
+  ctx.scale(SCALE, SCALE);
+
+  // ── Background ──────────────────────────────────────────────────────────────
+  ctx.fillStyle = "#0d1117";
+  ctx.fillRect(0, 0, W, H);
+
+  // ── Title block ─────────────────────────────────────────────────────────────
+  ctx.textAlign    = "center";
+  ctx.textBaseline = "middle";
+
+  ctx.fillStyle = "#f0a500";
+  ctx.font      = "bold 24px Arial";
+  ctx.fillText("טבלת השיבוץ", W / 2, PAD + 16);
+
   const today = new Date().toLocaleDateString("he-IL", {
     weekday: "long", year: "numeric", month: "long", day: "numeric",
   });
+  ctx.fillStyle = "#8b949e";
+  ctx.font      = "13px Arial";
+  ctx.fillText(today, W / 2, PAD + 42);
+  ctx.font      = "11px Arial";
+  ctx.fillText("משמרת בוקר 07:00–15:00", W / 2, PAD + 59);
 
-  return (
-    <div style={{ width: EXPORT_W, backgroundColor: "#0d1117",
-                  padding: "18px 20px 14px",
-                  fontFamily: "Arial, Helvetica, sans-serif",
-                  direction: "rtl" }}>
+  // Orange accent bar
+  ctx.fillStyle = "#f0a500";
+  ctx.fillRect(W / 2 - 28, PAD + 72, 56, 2);
 
-      {/* ── Title ── */}
-      <div style={{ textAlign: "center", marginBottom: "12px" }}>
-        <div style={{ color: "#f0a500", fontSize: "24px", fontWeight: "900" }}>
-          טבלת השיבוץ
-        </div>
-        <div style={{ color: "#8b949e", fontSize: "12px", marginTop: "4px" }}>{today}</div>
-        <div style={{ color: "#8b949e", fontSize: "11px", marginTop: "2px" }}>
-          משמרת בוקר 07:00–15:00
-        </div>
-        <div style={{ width: "48px", height: "2px", backgroundColor: "#f0a500",
-                      margin: "8px auto 0" }} />
-      </div>
+  // ── Column header row ────────────────────────────────────────────────────────
+  ctx.fillStyle = "#1c2330";
+  ctx.fillRect(GRID_X, GRID_Y, GRID_W, HDR_H);
 
-      {/* ── Grid ── */}
-      <div style={{ borderRadius: "10px", overflow: "hidden", border: "1px solid #30363d" }}>
+  // Guard name headers (RTL order: guard[n-1] leftmost, guard[0] rightmost)
+  guards.forEach((g, gi) => {
+    const colX = GRID_X + (N - 1 - gi) * guardW;
+    const cx   = colX + guardW / 2;
 
-        {/* Column header row */}
-        <div style={{ display: "flex", backgroundColor: "#1c2330",
-                      borderBottom: "2px solid #30363d" }}>
-          {/* "שעה" header */}
-          <div style={{ width: EXPORT_TW, flexShrink: 0,
-                        textAlign: "center", padding: "10px 4px",
-                        color: "#8b949e", fontSize: "12px", fontWeight: "bold" }}>
-            שעה
-          </div>
-          {/* Guard name headers */}
-          {guards.map((g, gi) => (
-            <div key={gi} style={{ flex: 1, textAlign: "center", padding: "10px 6px",
-                                   color: "#e6edf3", fontSize: "12px", fontWeight: "bold",
-                                   borderRight: "1px solid #30363d",
-                                   overflow: "hidden", whiteSpace: "nowrap",
-                                   textOverflow: "ellipsis" }}>
-              {guardDisplayName(g, gi, guards.length)}
-            </div>
-          ))}
-        </div>
+    // Column divider
+    ctx.fillStyle = "#30363d";
+    ctx.fillRect(colX, GRID_Y, 1, HDR_H);
 
-        {/* Hour rows */}
-        {HOURS.map((hr, h) => (
-          <div key={h} style={{ display: "flex", height: EXPORT_ROW,
-                                borderBottom: h < 7 ? "1px solid #21262d" : "none" }}>
+    // Guard name — truncate if needed
+    let name = guardDisplayName(g, gi, guards.length);
+    ctx.font = "bold 12px Arial";
+    while (ctx.measureText(name).width > guardW - 10 && name.length > 2)
+      name = name.slice(0, -1);
+    if (name !== guardDisplayName(g, gi, guards.length)) name += "…";
 
-            {/* Time label — lineHeight = row height → perfect vertical center */}
-            <div style={{ width: EXPORT_TW, flexShrink: 0,
-                          backgroundColor: "#1c2330",
-                          textAlign: "center",
-                          lineHeight: `${EXPORT_ROW}px` }}>
-              <span style={{ color: "#8b949e", fontSize: "12px", fontWeight: "600" }}>
-                {hr.split("-")[0]}
-              </span>
-            </div>
+    ctx.fillStyle    = "#e6edf3";
+    ctx.textAlign    = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(name, cx, GRID_Y + HDR_H / 2);
+  });
 
-            {/* Station cells */}
-            {guards.map((_, gi) => {
-              const st  = sched[h][gi];
-              const col = st ? SC[st] : null;
-              return (
-                <div key={gi} style={{ flex: 1, padding: `${EXPORT_PAD}px`,
-                                       boxSizing: "border-box", height: EXPORT_ROW }}>
-                  {/* lineHeight = INNER_H → single-line text perfectly centred */}
-                  <div style={{ height: INNER_H,
-                                textAlign: "center",
-                                lineHeight: `${INNER_H}px`,
-                                borderRadius: "6px",
-                                backgroundColor: col ? col.bg    : "transparent",
-                                border: `1px solid ${col ? col.border : "#30363d"}` }}>
-                    <span style={{ color: col ? col.text : "#8b949e",
-                                   fontSize: "12px", fontWeight: "bold" }}>
-                      {st ? SL[st] : "—"}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ))}
-      </div>
+  // "שעה" header (rightmost column)
+  ctx.fillStyle = "#30363d";
+  ctx.fillRect(TIME_X, GRID_Y, 1, HDR_H);
+  ctx.fillStyle    = "#8b949e";
+  ctx.font         = "bold 12px Arial";
+  ctx.textAlign    = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("שעה", TIME_X + TW / 2, GRID_Y + HDR_H / 2);
 
-      {/* Watermark */}
-      <div style={{ textAlign: "center", marginTop: "10px",
-                    color: "#30363d", fontSize: "10px" }}>
-        מנהל משמרות אבטחה · 07:00–15:00
-      </div>
-    </div>
-  );
+  // Header bottom border
+  ctx.fillStyle = "#30363d";
+  ctx.fillRect(GRID_X, GRID_Y + HDR_H, GRID_W, 2);
+
+  // ── Hour rows ────────────────────────────────────────────────────────────────
+  HOURS.forEach((hr, h) => {
+    const ry = GRID_Y + HDR_H + 2 + h * ROW_H;
+
+    if (h > 0) { ctx.fillStyle = "#21262d"; ctx.fillRect(GRID_X, ry, GRID_W, 1); }
+
+    // Time column background + label
+    ctx.fillStyle = "#1c2330";
+    ctx.fillRect(TIME_X, ry, TW, ROW_H);
+    ctx.fillStyle    = "#8b949e";
+    ctx.font         = "600 12px Arial";
+    ctx.textAlign    = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(hr.split("-")[0], TIME_X + TW / 2, ry + ROW_H / 2);
+
+    // Station cells
+    guards.forEach((_, gi) => {
+      const st   = sched[h][gi];
+      const col  = st ? SC[st] : null;
+      const colX = GRID_X + (N - 1 - gi) * guardW;
+      const ix = colX + CP, iy = ry + CP, iw = guardW - CP * 2, ih = ROW_H - CP * 2;
+
+      if (col) {
+        ctx.fillStyle = col.bg;
+        rrect(ctx, ix, iy, iw, ih, 6); ctx.fill();
+        ctx.strokeStyle = col.border; ctx.lineWidth = 1;
+        rrect(ctx, ix + .5, iy + .5, iw - 1, ih - 1, 6); ctx.stroke();
+        ctx.fillStyle    = col.text;
+        ctx.font         = "bold 12px Arial";
+        ctx.textAlign    = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(SL[st], colX + guardW / 2, ry + ROW_H / 2);
+      } else {
+        ctx.strokeStyle = "#30363d"; ctx.lineWidth = 1;
+        rrect(ctx, ix + .5, iy + .5, iw - 1, ih - 1, 6); ctx.stroke();
+      }
+    });
+  });
+
+  // Outer grid border
+  ctx.strokeStyle = "#30363d"; ctx.lineWidth = 1;
+  ctx.strokeRect(GRID_X + .5, GRID_Y + .5, GRID_W - 1, GRID_H - 1);
+
+  // ── Watermark ────────────────────────────────────────────────────────────────
+  ctx.fillStyle    = "#30363d";
+  ctx.font         = "10px Arial";
+  ctx.textAlign    = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("מנהל משמרות אבטחה · 07:00–15:00", W / 2, GRID_Y + GRID_H + 18);
+
+  return canvas;
 }
+
 // ─── Fullscreen Table ─────────────────────────────────────────────────────────
 function FullscreenTable({ sched, guards, onClose }) {
   return (
@@ -687,7 +742,6 @@ export default function App() {
   const [fullscreen, setFullscreen] = useState(false);
   const [showRules, setShowRules] = useState(false);
   const [sharing, setSharing] = useState(false);
-  const exportRef = useRef(null);
   const handleGenerate = useCallback(() => {
     setGenerating(true);
     setTimeout(() => {
@@ -703,16 +757,10 @@ export default function App() {
     setMenuVisible(true);
   }, [guards]);
   const handleShare = useCallback(async () => {
-    if (!exportRef.current || !sched) return;
+    if (!sched) return;
     setSharing(true);
     try {
-      const html2canvas = (await import("html2canvas")).default;
-      const canvas = await html2canvas(exportRef.current, {
-        backgroundColor: "#0d1117",
-        scale: 2,
-        useCORS: true,
-        logging: false,
-      });
+      const canvas = buildScheduleCanvas(sched, guards);
       const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
       const file = new File([blob], "sidur-avtaha.png", { type: "image/png" });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -729,7 +777,7 @@ export default function App() {
     } finally {
       setSharing(false);
     }
-  }, [sched]);
+  }, [sched, guards]);
 
   const handleSetCell = useCallback((st) => {
     if (!selCell || !sched) return;
@@ -833,15 +881,6 @@ export default function App() {
       {/* Fullscreen */}
       {sched && fullscreen && (
         <FullscreenTable sched={sched} guards={guards} onClose={() => setFullscreen(false)} />
-      )}
-      {/* Hidden export target — rendered off-screen for image generation */}
-      {sched && (
-        <div style={{ position: "fixed", top: "-9999px", left: "-9999px",
-                      zIndex: -1, pointerEvents: "none" }}>
-          <div ref={exportRef}>
-            <ExportTable sched={sched} guards={guards} />
-          </div>
-        </div>
       )}
     </div>
   );
