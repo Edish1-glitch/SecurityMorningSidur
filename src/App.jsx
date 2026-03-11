@@ -107,6 +107,9 @@ function validateSched(sched, guards) {
         if (!row.includes(r)) errs.push(`${gName}: חסר ${SL[r] || r}`);
       });
     }
+    // Rest-hour cap: break + malshinon ≤ 3 for all guards
+    const restCnt = row.filter(s => s === "break" || s === "malshinon").length;
+    if (restCnt > 3) errs.push(`${gName}: ${restCnt} שעות מנוחה (מקס׳ 3)`);
   });
   for (let h = 0; h < 8; h++) {
     if (!sched[h].includes("lenel")) errs.push(`${HOURS[h]}: Lenel לא מאויישת`);
@@ -185,9 +188,15 @@ function tryGen(seed, guards) {
   }
   for (const h of shuffle([0, 3, 4, 5, 6, 7])) {
     if (sched[h].includes("malshinon")) continue;
-    const cands = shuffle(Array.from({ length: N }, (_, i) => i)).filter(g =>
-      free(h, g) && !needsBreak(h, g)
-    );
+    const cands = shuffle(Array.from({ length: N }, (_, i) => i)).filter(g => {
+      if (!free(h, g) || needsBreak(h, g)) return false;
+      // Projected rest if we assign malshinon here:
+      // (curMals+1) + curBreaks + (emptySlots-1) where emptySlots includes slot h
+      const curMals   = sched.map(r => r[g]).filter(s => s === "malshinon").length;
+      const curBreaks = sched.map(r => r[g]).filter(s => s === "break").length;
+      const emptySlots = sched.map(r => r[g]).filter(s => !s).length;
+      return (curMals + 1) + curBreaks + (emptySlots - 1) <= 3;
+    });
     if (cands.length) sched[h][cands[0]] = "malshinon";
   }
   for (let h = 0; h < 8; h++) {
@@ -217,6 +226,28 @@ function postFix(sched, guards) {
         if (improved) break;
       }
       if (improved) break;
+    }
+    // Swap to fix rest-limit violations: trade a rest slot from an over-rested guard
+    // with an active slot from a guard who can absorb a break.
+    for (let g = 0; g < guards.length && !improved; g++) {
+      const restCnt = sched.map(r => r[g]).filter(s => s === "break" || s === "malshinon").length;
+      if (restCnt <= 3) continue;
+      for (let h = 0; h < 8 && !improved; h++) {
+        const curSt = sched[h][g];
+        if (curSt !== "break" && curSt !== "malshinon") continue;
+        for (let g2 = 0; g2 < guards.length && !improved; g2++) {
+          if (g2 === g) continue;
+          const st2 = sched[h][g2];
+          if (!st2 || REST.has(st2)) continue;           // g2 must hold an active station
+          const rested2 = sched.map(r => r[g2]).filter(s => s === "break" || s === "malshinon").length;
+          if (rested2 >= 3) continue;                    // g2 can't afford another rest
+          sched[h][g]  = st2;
+          sched[h][g2] = curSt;
+          if (validateSched(sched, guards).length < errs.length) { improved = true; break; }
+          sched[h][g]  = curSt;                          // revert
+          sched[h][g2] = st2;
+        }
+      }
     }
     if (!improved) break;
   }
@@ -284,7 +315,7 @@ function GuardSetup({ guards, setGuards, onGenerate, generating }) {
     setGuards(prev => prev.map((g, idx) => idx === i ? { ...g, [field]: val } : g));
   return (
     <div className="rounded-2xl p-4 mb-4" style={{ backgroundColor: "#161b22", border: "1px solid #30363d" }}>
-      <h2 className="text-sm font-bold mb-3 text-right" style={{ color: "#f0a500" }}>⚙️ הגדרת הצוות</h2>
+      <h2 className="text-sm font-bold mb-3 text-center" style={{ color: "#f0a500" }}>⚙️ הגדרת הצוות</h2>
       {guards.map((g, i) => (
         <div key={i} className="rounded-xl p-3 mb-2" style={{ backgroundColor: "#1c2330", border: "1px solid #30363d" }}>
           <input
@@ -633,7 +664,7 @@ function buildScheduleCanvas(sched, guards) {
   ctx.font         = "10px Arial";
   ctx.textAlign    = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText("מנהל משמרות אבטחה · 07:00–15:00", W / 2, GRID_Y + GRID_H + 18);
+  ctx.fillText("מנהל משמרות אבטחה ©", W / 2, GRID_Y + GRID_H + 18);
 
   return canvas;
 }
@@ -742,15 +773,23 @@ export default function App() {
   const [fullscreen, setFullscreen] = useState(false);
   const [showRules, setShowRules] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [origSched, setOrigSched] = useState(null);
   const handleGenerate = useCallback(() => {
     setGenerating(true);
     setTimeout(() => {
       const s = generate(guards);
       setSched(s);
+      setOrigSched(s.map(r => [...r]));
       setErrors(validateSched(s, guards));
       setGenerating(false);
     }, 10);
   }, [guards]);
+  const handleReset = useCallback(() => {
+    if (!origSched) return;
+    const s = origSched.map(r => [...r]);
+    setSched(s);
+    setErrors(validateSched(s, guards));
+  }, [origSched, guards]);
   const handleCellPress = useCallback((h, g) => {
     if (guards[g].isGate && h < 3) return;
     setSelCell({ h, g });
@@ -799,7 +838,7 @@ export default function App() {
         </div>
         {/* Collapsible Rules */}
         <button
-          className="w-full rounded-xl p-3 mb-4 text-right text-xs transition-all"
+          className="w-full rounded-xl p-3 mb-4 text-center text-xs transition-all"
           style={{ backgroundColor: "#1c2330", border: "1px solid #30363d", color: "#8b949e" }}
           onClick={() => setShowRules(!showRules)}
         >
@@ -838,10 +877,11 @@ export default function App() {
           <div className="flex gap-2 mb-3" style={{ direction: "rtl" }}>
             <button
               className="flex-1 py-2.5 rounded-xl text-xs font-semibold transition-all active:scale-95"
-              style={{ backgroundColor: "#1c2330", border: "1px solid #30363d", color: "#e6edf3" }}
-              onClick={handleGenerate}
+              style={{ backgroundColor: "#1c2330", border: "1px solid #30363d", color: origSched ? "#e6edf3" : "#555" }}
+              onClick={handleReset}
+              disabled={!origSched}
             >
-              🔄 צור מחדש
+              ↩️ איפס שינוי ידני
             </button>
             <button
               className="flex-1 py-2.5 rounded-xl text-xs font-semibold transition-all active:scale-95"
