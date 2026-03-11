@@ -325,42 +325,47 @@ function GuardSetup({ guards, setGuards, onGenerate, generating }) {
             onChange={e => updateGuard(i, "name", e.target.value)}
             placeholder={guardPlaceholder(i, guards.length)}
           />
-          <div className="flex flex-row-reverse items-center justify-between mb-1">
-            {i < guards.length - 1 ? (
-              <>
-                <span className="text-xs" style={{ color: "#8b949e" }}>רמה:</span>
-                <div className="flex gap-1.5">
-                  {["strong", "mid", "achmash"].map(lv => (
-                    <button
-                      key={lv}
-                      className="px-2.5 py-1 rounded-md text-xs font-medium transition-all"
-                      style={{
-                        border: `1px solid ${g.level === lv ? levelColor(lv) : "#30363d"}`,
-                        backgroundColor: g.level === lv ? levelColor(lv) + "25" : "transparent",
-                        color: g.level === lv ? levelColor(lv) : "#8b949e",
-                      }}
-                      onClick={() => updateGuard(i, "level", lv)}
-                    >
-                      {levelLabel(lv)}
-                    </button>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <span className="text-xs font-medium" style={{ color: "#f85149" }}>מאבטח שער (קבוע)</span>
+          <div className="flex flex-row-reverse items-center justify-between">
+            {/* כפולה checkbox — right side in RTL */}
+            <button
+              className="flex items-center gap-1.5 text-xs rounded px-1 py-0.5 transition-all"
+              style={{ color: g.isDouble ? "#f0a500" : "#8b949e" }}
+              onClick={() => updateGuard(i, "isDouble", !g.isDouble)}
+            >
+              <span className="font-medium">כפולה</span>
+              <span
+                className="w-4 h-4 rounded flex-shrink-0 flex items-center justify-center"
+                style={{
+                  border: `1.5px solid ${g.isDouble ? "#f0a500" : "#30363d"}`,
+                  backgroundColor: g.isDouble ? "#f0a500" : "transparent",
+                  color: "#000",
+                  fontSize: 10,
+                  fontWeight: "bold",
+                }}
+              >
+                {g.isDouble ? "✓" : ""}
+              </span>
+            </button>
+            {/* Level buttons — left side in RTL, only for non-gate guards */}
+            {i < guards.length - 1 && (
+              <div className="flex gap-1.5">
+                {["strong", "mid", "achmash"].map(lv => (
+                  <button
+                    key={lv}
+                    className="px-2.5 py-1 rounded-md text-xs font-medium transition-all"
+                    style={{
+                      border: `1px solid ${g.level === lv ? levelColor(lv) : "#30363d"}`,
+                      backgroundColor: g.level === lv ? levelColor(lv) + "25" : "transparent",
+                      color: g.level === lv ? levelColor(lv) : "#8b949e",
+                    }}
+                    onClick={() => updateGuard(i, "level", lv)}
+                  >
+                    {levelLabel(lv)}
+                  </button>
+                ))}
+              </div>
             )}
           </div>
-          {i < guards.length - 1 && (
-            <div className="flex flex-row-reverse mt-1">
-              <button
-                className="text-xs px-2 py-1 rounded transition-all"
-                style={{ color: g.isDouble ? "#f0a500" : "#8b949e" }}
-                onClick={() => updateGuard(i, "isDouble", !g.isDouble)}
-              >
-                {g.isDouble ? "✓" : "○"} כפולה
-              </button>
-            </div>
-          )}
         </div>
       ))}
       <button
@@ -377,13 +382,13 @@ function GuardSetup({ guards, setGuards, onGenerate, generating }) {
 function ValidationPanel({ errors }) {
   if (errors.length === 0) {
     return (
-      <div className="rounded-xl p-3 mb-4 text-center text-sm font-medium" style={{ backgroundColor: "#0f1f10", border: "1px solid #1a4a1a", color: "#3fb950" }}>
+      <div className="rounded-xl p-3 mb-4 text-sm font-medium text-right" style={{ direction: "rtl", backgroundColor: "#0f1f10", border: "1px solid #1a4a1a", color: "#3fb950" }}>
         ✅ הסידור תקין — כל הכללים מולאו!
       </div>
     );
   }
   return (
-    <div className="rounded-xl p-3 mb-4" style={{ backgroundColor: "#1a1010", border: "1px solid #4a1515" }}>
+    <div className="rounded-xl p-3 mb-4" style={{ direction: "rtl", backgroundColor: "#1a1010", border: "1px solid #4a1515" }}>
       <h3 className="text-sm font-bold mb-2 text-right" style={{ color: "#f85149" }}>⚠️ אזהרות</h3>
       {errors.map((e, i) => (
         <div key={i} className="text-xs py-0.5 text-right" style={{ color: "#fca5a5" }}>⚠️ {e}</div>
@@ -400,9 +405,11 @@ function StatsRow({ sched, guards }) {
         return (
           <div key={gi} className="rounded-xl p-3 flex-shrink-0" style={{ backgroundColor: "#161b22", border: "1px solid #30363d", minWidth: 130 }}>
             <div className="text-xs font-bold text-center mb-0.5" style={{ color: lc }}>{guardDisplayName(g, gi, guards.length)}</div>
-            <div className="text-xs text-center mb-2" style={{ color: lc }}>
-              {levelLabel(g.level)}{g.isDouble ? " · כפ" : ""}{g.isGate ? " · שע" : ""}
-            </div>
+            {(g.isDouble || g.isGate) && (
+              <div className="text-xs text-center mb-2" style={{ color: lc }}>
+                {[g.isGate && "שער", g.isDouble && "כפולה"].filter(Boolean).join(" · ")}
+              </div>
+            )}
             {Object.keys(SL).map(station => {
               const cnt = row.filter(x => x === station).length;
               return (
@@ -424,9 +431,7 @@ function StatsRow({ sched, guards }) {
 function ScheduleTable({ sched, guards, onCellPress }) {
   return (
     <div className="rounded-2xl p-3 mb-4 overflow-x-auto" style={{ backgroundColor: "#161b22", border: "1px solid #30363d" }}>
-      <div className="flex flex-row-reverse items-center justify-between mb-3">
-        <h2 className="text-sm font-bold" style={{ color: "#f0a500" }}>📋 טבלת השיבוץ</h2>
-      </div>
+      <h2 className="text-sm font-bold text-center mb-3" style={{ color: "#f0a500" }}>📋 טבלת השיבוץ</h2>
       <Legend />
       <div style={{ direction: "rtl", minWidth: guards.length * 65 + 70 }}>
         {/* Header */}
@@ -837,19 +842,38 @@ export default function App() {
           <p className="text-xs mt-1" style={{ color: "#8b949e" }}>שיבוץ אוטומטי חכם · משמרת בוקר 07:00–15:00</p>
         </div>
         {/* Collapsible Rules */}
-        <button
-          className="w-full rounded-xl p-3 mb-4 text-center text-xs transition-all"
-          style={{ backgroundColor: "#1c2330", border: "1px solid #30363d", color: "#8b949e" }}
-          onClick={() => setShowRules(!showRules)}
-        >
-          <span style={{ color: "#e6edf3", fontWeight: 700 }}>📖 כללים </span>
-          <span>{showRules ? "▲" : "▼"}</span>
+        <div className="rounded-xl mb-4" style={{ backgroundColor: "#1c2330", border: "1px solid #30363d" }}>
+          <button
+            className="w-full p-3 text-center text-xs transition-all"
+            style={{ color: "#8b949e" }}
+            onClick={() => setShowRules(!showRules)}
+          >
+            <span style={{ color: "#e6edf3", fontWeight: 700 }}>📖 כללים </span>
+            <span>{showRules ? "▲" : "▼"}</span>
+          </button>
           {showRules && (
-            <p className="mt-2 leading-5" style={{ color: "#8b949e" }}>
-              CICO לא פעיל 07–08 · מלשינון לא פעיל 08–10 · שער 07–10 בלבד · מקס׳ 3 שעות ברצף · אחרי CICO → הפסקה חובה · אחמ״ש: ללא CICO · CICO מתחלק שווה · כפולה: CICO בשעה האחרונה · אין מלשינון רצוף · אין כפילויות · איזון הפסקות (פער מקס׳ 1)
-            </p>
+            <div className="px-3 pb-3" style={{ direction: "rtl" }}>
+              {[
+                "CICO לא פעיל 07–08",
+                "מלשינון לא פעיל 08–10",
+                "שער 07–10 בלבד",
+                "מקס׳ 3 שעות ברצף",
+                "אחרי CICO → הפסקה חובה",
+                "אחמ״ש: ללא CICO",
+                "CICO מתחלק שווה",
+                "כפולה: CICO בשעה האחרונה",
+                "אין מלשינון רצוף",
+                "אין כפילויות",
+                "איזון הפסקות (פער מקס׳ 1)",
+              ].map((rule, i) => (
+                <div key={i} className="flex items-center gap-1.5 py-0.5">
+                  <span className="text-xs">✅</span>
+                  <span className="text-xs leading-5" style={{ color: "#8b949e" }}>{rule}</span>
+                </div>
+              ))}
+            </div>
           )}
-        </button>
+        </div>
         {/* Guard Setup */}
         <GuardSetup guards={guards} setGuards={setGuards} onGenerate={handleGenerate} generating={generating} />
         {/* Stats */}
@@ -868,8 +892,6 @@ export default function App() {
                 🔲 מסך מלא
               </button>
             </div>
-            {/* Validation — shown below the table */}
-            <ValidationPanel errors={errors} />
           </>
         )}
         {/* Action buttons */}
@@ -892,6 +914,8 @@ export default function App() {
             </button>
           </div>
         )}
+        {/* Validation — below action buttons */}
+        {sched && <ValidationPanel errors={errors} />}
         {/* Share button */}
         {sched && (
           <button
