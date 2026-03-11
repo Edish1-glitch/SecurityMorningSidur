@@ -42,11 +42,14 @@ function consec(h, g, sched) {
 }
 function cicoLimit(gIdx, guards) {
   const g = guards[gIdx];
-  if (g.level === "achmash") return 0;
+  const achmashCount = guards.filter(x => x.level === "achmash").length;
+  // When 2+ achmash present, each achmash does 1 CICO for fairness
+  if (g.level === "achmash") return achmashCount >= 2 ? 1 : 0;
   const hasAchmash = guards.some(x => x.level === "achmash" && !x.isGate);
   if (g.isGate) return hasAchmash ? 2 : 1;
   if (hasAchmash) {
-    const eligible = guards.filter(x => x.level !== "achmash").length;
+    // If 2+ achmash also do CICO, distribute among all non-gate guards
+    const eligible = guards.filter(x => !x.isGate).length;
     if (eligible === 0) return 0;
     return Math.ceil(7 / eligible);
   }
@@ -62,15 +65,20 @@ function canPlaceFix(h, g, st, sched, guards) {
   }
   if (st === "malshinon" && h > 0 && sched[h - 1][g] === "malshinon") return false;
   if (st === "malshinon" && h < 7 && sched[h + 1][g] === "malshinon") return false;
-  if (sched[h].some((s, gi) => gi !== g && s === st)) return false;
+  // Break: multiple guards can be on break simultaneously, but never two consecutive breaks
+  if (st === "break" && h > 0 && sched[h - 1][g] === "break") return false;
+  // Non-break stations must be unique per hour
+  if (st !== "break" && sched[h].some((s, gi) => gi !== g && s === st)) return false;
   return true;
 }
 function validateSched(sched, guards) {
   const errs = [];
+  const achmashCount = guards.filter(x => x.level === "achmash").length;
   for (let h = 0; h < 8; h++) {
     const seen = {};
     sched[h].forEach((s) => {
-      if (!s) return;
+      // Multiple guards can be on break simultaneously — skip break from dup check
+      if (!s || s === "break") return;
       if (seen[s]) errs.push(`כפילות ב-${HOURS[h]}: ${SL[s] || s}`);
       seen[s] = true;
     });
@@ -87,6 +95,11 @@ function validateSched(sched, guards) {
       if (row[h] === "cico" && row[h + 1] && row[h + 1] !== "break")
         errs.push(`${gName}: אחרי CICO ללא הפסקה`);
     }
+    // No two consecutive break hours
+    for (let h = 0; h < 7; h++) {
+      if (row[h] === "break" && row[h + 1] === "break")
+        errs.push(`${gName}: הפסקות ברצף@${HOURS[h]}`);
+    }
     const cc = row.filter(s => s === "cico").length;
     const lim = cicoLimit(g, guards);
     if (cc > lim) errs.push(`${gName}: ${cc} CICO (מקס׳ ${lim})`);
@@ -97,7 +110,10 @@ function validateSched(sched, guards) {
         errs.push(`${gName}: מלשינון רצוף@${HOURS[h]}`);
     }
     if (guard.level === "achmash") {
-      ["lenel", "bosh", "malshinon", "break"].forEach(r => {
+      // When 2+ achmash, they must also do CICO for fairness
+      const required = ["lenel", "bosh", "malshinon", "break"];
+      if (achmashCount >= 2) required.push("cico");
+      required.forEach(r => {
         if (!row.includes(r)) errs.push(`${gName}: חסר ${SL[r] || r}`);
       });
     } else if (guard.isGate) {
@@ -152,8 +168,9 @@ function tryGen(seed, guards) {
     if (g.isGate) for (let h = 0; h < 3; h++) sched[h][gi] = "shaar";
     if (g.isDouble) sched[7][gi] = "cico";
   });
+  const achmashCount = guards.filter(x => x.level === "achmash").length;
   const cicoGuards = shuffle(Array.from({ length: N }, (_, i) => i))
-    .filter(g => guards[g].level !== "achmash");
+    .filter(g => guards[g].level !== "achmash" || achmashCount >= 2);
   for (const g of cicoGuards) {
     const lim = cicoLimit(g, guards);
     const cur = sched.map(r => r[g]).filter(s => s === "cico").length;
@@ -201,7 +218,15 @@ function tryGen(seed, guards) {
   }
   for (let h = 0; h < 8; h++) {
     for (let g = 0; g < N; g++) {
-      if (!sched[h][g]) sched[h][g] = "break";
+      if (!sched[h][g]) {
+        // Prefer malshinon over break to avoid two consecutive breaks
+        const prevIsBreak = h > 0 && sched[h - 1][g] === "break";
+        const malshinonOk = prevIsBreak &&
+          assignable(h).includes("malshinon") &&
+          !sched[h].some((s, gi) => gi !== g && s === "malshinon") &&
+          !(h > 0 && sched[h - 1][g] === "malshinon");
+        sched[h][g] = malshinonOk ? "malshinon" : "break";
+      }
     }
   }
   return sched;
@@ -246,6 +271,29 @@ function postFix(sched, guards) {
           if (validateSched(sched, guards).length < errs.length) { improved = true; break; }
           sched[h][g]  = curSt;                          // revert
           sched[h][g2] = st2;
+        }
+      }
+    }
+    // Fix consecutive breaks: try replacing one of the two with malshinon
+    for (let g = 0; g < guards.length && !improved; g++) {
+      for (let h = 1; h < 8 && !improved; h++) {
+        if (sched[h][g] !== "break" || sched[h - 1][g] !== "break") continue;
+        // Try replacing hour h with malshinon
+        if (assignable(h).includes("malshinon") &&
+            !sched[h].some((s, gi) => gi !== g && s === "malshinon") &&
+            !(h < 7 && sched[h + 1][g] === "malshinon")) {
+          sched[h][g] = "malshinon";
+          if (validateSched(sched, guards).length < errs.length) { improved = true; break; }
+          sched[h][g] = "break"; // revert
+        }
+        // Try replacing hour h-1 with malshinon
+        if (!improved &&
+            assignable(h - 1).includes("malshinon") &&
+            !sched[h - 1].some((s, gi) => gi !== g && s === "malshinon") &&
+            !(h > 1 && sched[h - 2][g] === "malshinon")) {
+          sched[h - 1][g] = "malshinon";
+          if (validateSched(sched, guards).length < errs.length) { improved = true; break; }
+          sched[h - 1][g] = "break"; // revert
         }
       }
     }
