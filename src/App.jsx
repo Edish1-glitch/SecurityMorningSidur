@@ -478,59 +478,72 @@ function CellEditModal({ visible, hour, guardIdx, guards, onSelect, onClose }) {
   );
 }
 // ─── Export Table (rendered off-screen → PNG → share) ────────────────────────
-const EXPORT_W   = 820;  // landscape width
-const EXPORT_TW  = 72;   // time column width
-const EXPORT_ROW = 44;   // fixed row height — guarantees text centering
+// html2canvas does NOT reliably render flexbox alignment — use lineHeight
+// for vertical centering and textAlign:center for horizontal centering instead.
+const EXPORT_W    = 820; // landscape width
+const EXPORT_TW   = 72;  // time column width
+const EXPORT_ROW  = 46;  // row height (px)
+const EXPORT_PAD  = 3;   // cell padding (px)
+const INNER_H     = EXPORT_ROW - EXPORT_PAD * 2; // inner colored div height
 
 function ExportTable({ sched, guards }) {
   const today = new Date().toLocaleDateString("he-IL", {
     weekday: "long", year: "numeric", month: "long", day: "numeric",
   });
 
-  // Guard columns use flex:1 so they always fill remaining space equally —
-  // no fixed colW arithmetic that can overflow or clip.
-  const hdrCell = {
-    flex: 1, textAlign: "center", padding: "10px 6px",
-    color: "#e6edf3", fontSize: "12px", fontWeight: "bold",
-    borderRight: "1px solid #30363d", overflow: "hidden",
-    whiteSpace: "nowrap", textOverflow: "ellipsis",
-  };
-
   return (
-    <div style={{ width: EXPORT_W, backgroundColor: "#0d1117", padding: "18px 20px 14px",
-                  fontFamily: "Arial, Helvetica, sans-serif", direction: "rtl" }}>
+    <div style={{ width: EXPORT_W, backgroundColor: "#0d1117",
+                  padding: "18px 20px 14px",
+                  fontFamily: "Arial, Helvetica, sans-serif",
+                  direction: "rtl" }}>
 
       {/* ── Title ── */}
       <div style={{ textAlign: "center", marginBottom: "12px" }}>
-        <div style={{ color: "#f0a500", fontSize: "24px", fontWeight: "900", letterSpacing: "0.5px" }}>
+        <div style={{ color: "#f0a500", fontSize: "24px", fontWeight: "900" }}>
           טבלת השיבוץ
         </div>
         <div style={{ color: "#8b949e", fontSize: "12px", marginTop: "4px" }}>{today}</div>
-        <div style={{ color: "#8b949e", fontSize: "11px", marginTop: "2px" }}>משמרת בוקר 07:00–15:00</div>
-        <div style={{ width: "48px", height: "2px", backgroundColor: "#f0a500", margin: "8px auto 0" }} />
+        <div style={{ color: "#8b949e", fontSize: "11px", marginTop: "2px" }}>
+          משמרת בוקר 07:00–15:00
+        </div>
+        <div style={{ width: "48px", height: "2px", backgroundColor: "#f0a500",
+                      margin: "8px auto 0" }} />
       </div>
 
       {/* ── Grid ── */}
       <div style={{ borderRadius: "10px", overflow: "hidden", border: "1px solid #30363d" }}>
 
-        {/* Column headers */}
-        <div style={{ display: "flex", backgroundColor: "#1c2330", borderBottom: "2px solid #30363d" }}>
-          <div style={{ width: EXPORT_TW, flexShrink: 0, textAlign: "center", padding: "10px 4px",
-                        color: "#8b949e", fontSize: "12px", fontWeight: "bold" }}>שעה</div>
+        {/* Column header row */}
+        <div style={{ display: "flex", backgroundColor: "#1c2330",
+                      borderBottom: "2px solid #30363d" }}>
+          {/* "שעה" header */}
+          <div style={{ width: EXPORT_TW, flexShrink: 0,
+                        textAlign: "center", padding: "10px 4px",
+                        color: "#8b949e", fontSize: "12px", fontWeight: "bold" }}>
+            שעה
+          </div>
+          {/* Guard name headers */}
           {guards.map((g, gi) => (
-            <div key={gi} style={hdrCell}>
+            <div key={gi} style={{ flex: 1, textAlign: "center", padding: "10px 6px",
+                                   color: "#e6edf3", fontSize: "12px", fontWeight: "bold",
+                                   borderRight: "1px solid #30363d",
+                                   overflow: "hidden", whiteSpace: "nowrap",
+                                   textOverflow: "ellipsis" }}>
               {guardDisplayName(g, gi, guards.length)}
             </div>
           ))}
         </div>
 
-        {/* Hour rows — fixed height so cells fill 100% and text stays centred */}
+        {/* Hour rows */}
         {HOURS.map((hr, h) => (
           <div key={h} style={{ display: "flex", height: EXPORT_ROW,
                                 borderBottom: h < 7 ? "1px solid #21262d" : "none" }}>
-            {/* Time label */}
-            <div style={{ width: EXPORT_TW, flexShrink: 0, backgroundColor: "#1c2330",
-                          display: "flex", alignItems: "center", justifyContent: "center" }}>
+
+            {/* Time label — lineHeight = row height → perfect vertical center */}
+            <div style={{ width: EXPORT_TW, flexShrink: 0,
+                          backgroundColor: "#1c2330",
+                          textAlign: "center",
+                          lineHeight: `${EXPORT_ROW}px` }}>
               <span style={{ color: "#8b949e", fontSize: "12px", fontWeight: "600" }}>
                 {hr.split("-")[0]}
               </span>
@@ -541,15 +554,17 @@ function ExportTable({ sched, guards }) {
               const st  = sched[h][gi];
               const col = st ? SC[st] : null;
               return (
-                <div key={gi} style={{ flex: 1, padding: "3px",
-                                       display: "flex", alignItems: "stretch" }}>
-                  <div style={{ flex: 1, display: "flex", alignItems: "center",
-                                justifyContent: "center", borderRadius: "6px",
-                                backgroundColor: col ? col.bg   : "transparent",
+                <div key={gi} style={{ flex: 1, padding: `${EXPORT_PAD}px`,
+                                       boxSizing: "border-box", height: EXPORT_ROW }}>
+                  {/* lineHeight = INNER_H → single-line text perfectly centred */}
+                  <div style={{ height: INNER_H,
+                                textAlign: "center",
+                                lineHeight: `${INNER_H}px`,
+                                borderRadius: "6px",
+                                backgroundColor: col ? col.bg    : "transparent",
                                 border: `1px solid ${col ? col.border : "#30363d"}` }}>
                     <span style={{ color: col ? col.text : "#8b949e",
-                                   fontSize: "12px", fontWeight: "bold",
-                                   textAlign: "center" }}>
+                                   fontSize: "12px", fontWeight: "bold" }}>
                       {st ? SL[st] : "—"}
                     </span>
                   </div>
@@ -561,7 +576,8 @@ function ExportTable({ sched, guards }) {
       </div>
 
       {/* Watermark */}
-      <div style={{ textAlign: "center", marginTop: "10px", color: "#30363d", fontSize: "10px" }}>
+      <div style={{ textAlign: "center", marginTop: "10px",
+                    color: "#30363d", fontSize: "10px" }}>
         מנהל משמרות אבטחה · 07:00–15:00
       </div>
     </div>
