@@ -484,10 +484,17 @@ function FullscreenTable({ sched, guards, onClose }) {
       className="fixed inset-0 z-50 flex flex-col"
       style={{ backgroundColor: "#0d1117", height: "100dvh", width: "100dvw" }}
     >
-      {/* Compact header */}
+      {/* Compact header — safe area: top (Dynamic Island portrait) + sides (camera landscape) */}
       <div
-        className="flex items-center justify-between px-3 py-1.5 flex-shrink-0"
-        style={{ direction: "rtl", borderBottom: "1px solid #30363d" }}
+        className="flex items-center justify-between flex-shrink-0"
+        style={{
+          direction: "rtl",
+          borderBottom: "1px solid #30363d",
+          paddingTop: "calc(env(safe-area-inset-top) + 6px)",
+          paddingBottom: "6px",
+          paddingLeft: "calc(env(safe-area-inset-left) + 12px)",
+          paddingRight: "calc(env(safe-area-inset-right) + 12px)",
+        }}
       >
         <span className="font-extrabold text-xs" style={{ color: "#f0a500" }}>📋 טבלת השיבוץ</span>
         <button
@@ -497,8 +504,16 @@ function FullscreenTable({ sched, guards, onClose }) {
         >✕</button>
       </div>
 
-      {/* Table — fills all remaining height, no scroll */}
-      <div className="flex-1 flex flex-col overflow-hidden" style={{ direction: "rtl" }}>
+      {/* Table — fills all remaining height, no scroll, respects side + bottom safe areas */}
+      <div
+        className="flex-1 flex flex-col overflow-hidden"
+        style={{
+          direction: "rtl",
+          paddingLeft: "env(safe-area-inset-left)",
+          paddingRight: "env(safe-area-inset-right)",
+          paddingBottom: "env(safe-area-inset-bottom)",
+        }}
+      >
         {/* Column headers */}
         <div className="flex flex-shrink-0" style={{ borderBottom: "1px solid #30363d" }}>
           <div
