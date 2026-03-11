@@ -813,8 +813,6 @@ export default function App() {
         </button>
         {/* Guard Setup */}
         <GuardSetup guards={guards} setGuards={setGuards} onGenerate={handleGenerate} generating={generating} />
-        {/* Validation */}
-        {sched && <ValidationPanel errors={errors} />}
         {/* Stats */}
         {sched && <StatsRow sched={sched} guards={guards} />}
         {/* Schedule Table */}
@@ -831,6 +829,8 @@ export default function App() {
                 🔲 מסך מלא
               </button>
             </div>
+            {/* Validation — shown below the table */}
+            <ValidationPanel errors={errors} />
           </>
         )}
         {/* Action buttons */}
