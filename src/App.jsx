@@ -66,7 +66,20 @@ function cicoLimit(gIdx, guards) {
     if (nonAchmashCount === 0) return 0;
     return Math.ceil(7 / nonAchmashCount);
   }
-  return g.level === "strong" ? 1 : 2;
+
+  // No achmash: base limits (strong=1, mid=2) were designed for the classic
+  // 2-strong + 2-mid + 1-gate composition (total = 7). For other compositions
+  // the total capacity may fall short of 7, leaving a CICO hour uncovered and
+  // causing duplicate breaks. Boost all non-gate guards evenly to close the gap.
+  const baseLimit = g.level === "strong" ? 1 : 2;
+  const totalCapacity = guards.reduce((sum, guard) => {
+    if (guard.level === "achmash") return sum;
+    return sum + (guard.isGate ? 1 : (guard.level === "strong" ? 1 : 2));
+  }, 0);
+  if (totalCapacity >= 7) return baseLimit;
+  const nonGateEligible = guards.filter(x => x.level !== "achmash" && !x.isGate).length;
+  if (nonGateEligible === 0) return baseLimit;
+  return baseLimit + Math.ceil((7 - totalCapacity) / nonGateEligible);
 }
 function canPlaceFix(h, g, st, sched, guards) {
   if (!assignable(h).includes(st)) return false;
