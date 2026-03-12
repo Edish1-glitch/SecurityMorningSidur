@@ -91,10 +91,10 @@ function canPlaceFix(h, g, st, sched, guards) {
   }
   if (st === "malshinon" && h > 0 && sched[h - 1][g] === "malshinon") return false;
   if (st === "malshinon" && h < 7 && sched[h + 1][g] === "malshinon") return false;
-  // Break: multiple guards can be on break simultaneously, but never two consecutive breaks
+  // No consecutive breaks for the same guard
   if (st === "break" && h > 0 && sched[h - 1][g] === "break") return false;
-  // Non-break stations must be unique per hour
-  if (st !== "break" && sched[h].some((s, gi) => gi !== g && s === st)) return false;
+  // All stations (including break) must be unique per hour — max 1 guard per station per hour
+  if (sched[h].some((s, gi) => gi !== g && s === st)) return false;
   return true;
 }
 function validateSched(sched, guards) {
@@ -103,8 +103,8 @@ function validateSched(sched, guards) {
   for (let h = 0; h < 8; h++) {
     const seen = {};
     sched[h].forEach((s) => {
-      // Multiple guards can be on break simultaneously — skip break from dup check
-      if (!s || s === "break") return;
+      // All stations including break must be unique per hour (max 1 guard per station)
+      if (!s) return;
       if (seen[s]) errs.push(`כפילות ב-${HOURS[h]}: ${SL[s] || s}`);
       seen[s] = true;
     });
