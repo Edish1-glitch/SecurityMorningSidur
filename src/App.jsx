@@ -449,8 +449,8 @@ function GuardSetup({ guards, setGuards, onGenerate, generating }) {
       {guards.map((g, i) => (
         <div key={i} className="rounded-xl p-3 mb-2" style={{ backgroundColor: "#1c2330", border: "1px solid #30363d" }}>
           <input
-            className="w-full text-center font-bold text-sm pb-1.5 mb-2 bg-transparent outline-none"
-            style={{ color: "#e6edf3", borderBottom: "1px solid #30363d" }}
+            className="w-full text-center font-bold pb-1.5 mb-2 bg-transparent outline-none"
+            style={{ color: "#e6edf3", borderBottom: "1px solid #30363d", fontSize: 16 }}
             value={g.name}
             onChange={e => updateGuard(i, "name", e.target.value)}
             placeholder={guardPlaceholder(i, guards.length)}
