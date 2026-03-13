@@ -3,7 +3,9 @@ import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 // ─── PIN Protection ────────────────────────────────────────────────────────────
 // Change this to your desired PIN:
 const APP_PIN = "1234";
-const SESSION_KEY = "mgr_auth_v1";
+const SESSION_KEY  = "mgr_auth_v1";
+const PROFILE_KEY  = "mgr_profile_v1";
+const PROFILE_DEFAULTS = { name: "", role: 'אחמ"ש' };
 
 export { SESSION_KEY };
 export function PinScreen({ onAuth }) {
@@ -585,6 +587,50 @@ const DEFAULT_GUARDS = [
 ];
 
 // ─── Components ───────────────────────────────────────────────────────────────
+
+function ProfileSection({ profile, onChange }) {
+  return (
+    <div className="rounded-2xl p-4 mb-4" style={{ backgroundColor: "#161b22", border: "1px solid #30363d" }}>
+      <h2 className="text-sm font-bold mb-3 text-center" style={{ color: "#58a6ff" }}>👤 הפרופיל שלי</h2>
+
+      {/* Name */}
+      <input
+        className="w-full text-center font-bold pb-1.5 mb-3 bg-transparent outline-none"
+        style={{
+          color: profile.name ? "#e6edf3" : "#8b949e",
+          borderBottom: "1px solid #30363d",
+          fontSize: 16,
+        }}
+        value={profile.name}
+        onChange={e => onChange("name", e.target.value)}
+        placeholder="שם מלא (פרטי + משפחה)"
+      />
+
+      {/* Role toggle */}
+      <div className="flex gap-2 justify-center">
+        {['אחמ"ש', 'אחמ"שית'].map(r => (
+          <button
+            key={r}
+            className="px-5 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-95"
+            style={{
+              border: `1px solid ${profile.role === r ? "#58a6ff" : "#30363d"}`,
+              backgroundColor: profile.role === r ? "#1a253540" : "transparent",
+              color: profile.role === r ? "#58a6ff" : "#8b949e",
+            }}
+            onClick={() => onChange("role", r)}
+          >
+            {r}
+          </button>
+        ))}
+      </div>
+
+      {profile.name && (
+        <div className="text-xs text-center mt-2" style={{ color: "#3fb950" }}>✓ נשמר בטלפון</div>
+      )}
+    </div>
+  );
+}
+
 function StationBadge({ station, size = "md" }) {
   const col = SC[station];
   if (!col) return null;
@@ -1184,48 +1230,39 @@ function FullscreenTable({ sched, guards, onClose }) {
 const TAKKEN_FULL    = "מלא";
 const TAKKEN_SHORTAGE = "חוסר מאבטח לא חמוש בין 07:00–15:00";
 
-function AttendanceReport({ guards, isShortage }) {
+function AttendanceReport({ guards, isShortage, profile }) {
   const SHIFTS       = ["בוקר", "צהריים", "לילה"];
-  const ROLE_OPTIONS = ["מאבטח", "מאבטחת", "חמוש"]; // אחמ"ש is auto-locked
+  const ROLE_OPTIONS = ["מאבטח", "מאבטחת", "חמוש"];
   const DAYS_HE      = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
-
-  // Achmash always first, then others in original order; keep original index for display name
-  const sortedWithIdx = useMemo(() => [
-    ...guards.map((g, i) => ({ g, i })).filter(x => x.g.level === "achmash"),
-    ...guards.map((g, i) => ({ g, i })).filter(x => x.g.level !== "achmash"),
-  ], [guards]);
-
-  const mkRoles = (swi) => swi.map(({ g }) => g.level === "achmash" ? 'אחמ"ש' : "מאבטח");
 
   const [open, setOpen]             = useState(false);
   const [shift, setShift]           = useState("בוקר");
-  const [roles, setRoles]           = useState(() => mkRoles(sortedWithIdx));
+  const [roles, setRoles]           = useState(() => guards.map(() => "מאבטח"));
   const [status, setStatus]         = useState(() => isShortage ? TAKKEN_SHORTAGE : TAKKEN_FULL);
   const [reportText, setReportText] = useState("");
   const [copied, setCopied]         = useState(false);
 
   // Reset when guard list or shortage mode changes
   useEffect(() => {
-    const swi = [
-      ...guards.map((g, i) => ({ g, i })).filter(x => x.g.level === "achmash"),
-      ...guards.map((g, i) => ({ g, i })).filter(x => x.g.level !== "achmash"),
-    ];
-    setRoles(mkRoles(swi));
+    setRoles(guards.map(() => "מאבטח"));
     setStatus(isShortage ? TAKKEN_SHORTAGE : TAKKEN_FULL);
     setReportText("");
   }, [guards, isShortage]);
 
-  const updateRole = (pos, val) =>
-    setRoles(prev => prev.map((r, idx) => (idx === pos ? val : r)));
+  const updateRole = (i, val) =>
+    setRoles(prev => prev.map((r, idx) => (idx === i ? val : r)));
 
   const generateReport = () => {
     const now     = new Date();
     const dayName = DAYS_HE[now.getDay()];
     const dateStr = `${now.getDate()}/${now.getMonth() + 1}/${now.getFullYear()}`;
-    const totalCount = guards.length + 2; // +2 חמושים
+    // 1 (profile) + guards + 2 (חמושים)
+    const totalCount = 1 + guards.length + 2;
+    const profileName = profile.name || "_____________";
 
-    const guardLines = sortedWithIdx.map(({ g, i: origIdx }, pos) =>
-      `*${pos + 1}.* ${guardDisplayName(g, origIdx, guards.length)} - (${roles[pos] || "מאבטח"})`
+    // Profile is #1, guards are #2..N+1, חמושים are #N+2 and #N+3
+    const guardLines = guards.map((g, i) =>
+      `*${i + 2}.* ${guardDisplayName(g, i, guards.length)} - (${roles[i] || "מאבטח"})`
     );
 
     const text = [
@@ -1236,9 +1273,10 @@ function AttendanceReport({ guards, isShortage }) {
       `משמרת: ${shift}`,
       ``,
       `*צוות 3:* (${totalCount})`,
+      `*1.* ${profileName} - (${profile.role || 'אחמ"ש'})`,
       ...guardLines,
-      `*${guards.length + 1}.* _____________ - (חמוש)`,
       `*${guards.length + 2}.* _____________ - (חמוש)`,
+      `*${guards.length + 3}.* _____________ - (חמוש)`,
       ``,
       `תקן: ${status}`,
     ].join("\n");
@@ -1296,45 +1334,50 @@ function AttendanceReport({ guards, isShortage }) {
             </div>
           </div>
 
-          {/* Guard roles — achmash always first with locked badge */}
+          {/* Guard roles — profile always #1 (locked), guards #2 onwards */}
           <div className="mb-3">
             <div className="text-xs font-medium mb-1.5" style={{ color: "#8b949e" }}>תפקידים:</div>
-            {sortedWithIdx.map(({ g, i: origIdx }, pos) => (
-              <div key={origIdx} className="flex items-center gap-2 mb-1.5">
+
+            {/* Profile row — always first, locked */}
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="text-xs font-bold flex-1 truncate" style={{ color: "#e6edf3" }}>
+                {profile.name || <span style={{ color: "#555" }}>לא הוגדר שם אחמ"ש</span>}
+              </span>
+              <span
+                className="rounded-lg px-2 py-1.5 text-xs font-medium text-center"
+                style={{
+                  backgroundColor: "#1a253540",
+                  border: "1px solid #58a6ff",
+                  color: "#58a6ff",
+                  minWidth: 100,
+                  display: "inline-block",
+                }}
+              >
+                {profile.role || 'אחמ"ש'}
+              </span>
+            </div>
+
+            {/* Guard rows */}
+            {guards.map((g, i) => (
+              <div key={i} className="flex items-center gap-2 mb-1.5">
                 <span className="text-xs font-bold flex-1 truncate" style={{ color: "#e6edf3" }}>
-                  {guardDisplayName(g, origIdx, guards.length)}
+                  {guardDisplayName(g, i, guards.length)}
                 </span>
-                {g.level === "achmash" ? (
-                  /* Locked badge for achmash — no dropdown */
-                  <span
-                    className="rounded-lg px-2 py-1.5 text-xs font-medium text-center"
-                    style={{
-                      backgroundColor: "#1a253540",
-                      border: "1px solid #58a6ff",
-                      color: "#58a6ff",
-                      minWidth: 100,
-                      display: "inline-block",
-                    }}
-                  >
-                    אחמ"ש
-                  </span>
-                ) : (
-                  <select
-                    value={roles[pos] || "מאבטח"}
-                    onChange={e => updateRole(pos, e.target.value)}
-                    className="rounded-lg px-2 py-1.5"
-                    style={{
-                      backgroundColor: "#1c2330",
-                      border: "1px solid #30363d",
-                      color: "#e6edf3",
-                      minWidth: 100,
-                      outline: "none",
-                      fontSize: 16,
-                    }}
-                  >
-                    {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
-                  </select>
-                )}
+                <select
+                  value={roles[i] || "מאבטח"}
+                  onChange={e => updateRole(i, e.target.value)}
+                  className="rounded-lg px-2 py-1.5"
+                  style={{
+                    backgroundColor: "#1c2330",
+                    border: "1px solid #30363d",
+                    color: "#e6edf3",
+                    minWidth: 100,
+                    outline: "none",
+                    fontSize: 16,
+                  }}
+                >
+                  {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
               </div>
             ))}
           </div>
@@ -1417,6 +1460,21 @@ function AttendanceReport({ guards, isShortage }) {
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
+  // ── Profile (localStorage) ──────────────────────────────────────────────────
+  const [profile, setProfile] = useState(() => {
+    try {
+      const saved = localStorage.getItem(PROFILE_KEY);
+      return saved ? JSON.parse(saved) : { ...PROFILE_DEFAULTS };
+    } catch { return { ...PROFILE_DEFAULTS }; }
+  });
+  const handleProfileChange = useCallback((field, val) => {
+    setProfile(prev => {
+      const next = { ...prev, [field]: val };
+      localStorage.setItem(PROFILE_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
   const [guards, setGuards] = useState(DEFAULT_GUARDS.map(g => ({ ...g })));
   const [sched, setSched] = useState(null);
   const [errors, setErrors] = useState([]);
@@ -1572,6 +1630,9 @@ export default function App() {
           )}
         </div>
 
+        {/* Profile */}
+        <ProfileSection profile={profile} onChange={handleProfileChange} />
+
         {/* Guard Setup */}
         <GuardSetup guards={guards} setGuards={setGuards} />
 
@@ -1651,7 +1712,7 @@ export default function App() {
         {sched && <ValidationPanel errors={errors} isShortage={isShortage} />}
 
         {/* Attendance Report */}
-        {sched && <AttendanceReport guards={displayGuards} isShortage={isShortage} />}
+        {sched && <AttendanceReport guards={displayGuards} isShortage={isShortage} profile={profile} />}
 
         {/* Share */}
         {sched && (
