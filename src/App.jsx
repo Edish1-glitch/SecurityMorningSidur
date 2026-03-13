@@ -559,6 +559,11 @@ function guardPlaceholder(i, total) {
 function guardDisplayName(g, i, total) {
   return g.name || guardPlaceholder(i, total);
 }
+// First name only (for schedule table); full name (for attendance report)
+function guardFirstName(g, i, total) {
+  if (!g.name) return guardPlaceholder(i, total);
+  return g.name.split(" ")[0];
+}
 const DEFAULT_GUARDS = [
   { name: "", level: "strong", isDouble: false, isGate: false, isAbsent: false },
   { name: "", level: "strong", isDouble: false, isGate: false, isAbsent: false },
@@ -814,7 +819,7 @@ function StatsRow({ sched, guards }) {
         const lc = levelColor(g.level);
         return (
           <div key={gi} className="rounded-xl p-3 flex-shrink-0" style={{ backgroundColor: "#161b22", border: "1px solid #30363d", minWidth: 130 }}>
-            <div className="text-xs font-bold text-center mb-0.5" style={{ color: lc }}>{guardDisplayName(g, gi, guards.length)}</div>
+            <div className="text-xs font-bold text-center mb-0.5" style={{ color: lc }}>{guardFirstName(g, gi, guards.length)}</div>
             {(g.isDouble || g.isGate) && (
               <div className="text-xs text-center mb-2" style={{ color: lc }}>
                 {[g.isGate && "שער", g.isDouble && "כפולה"].filter(Boolean).join(" · ")}
@@ -854,7 +859,7 @@ function ScheduleTable({ sched, guards, onCellPress, isShortage }) {
           </div>
           {guards.map((g, gi) => (
             <div key={gi} className="flex-1 flex items-center justify-center py-2 min-w-0" style={{ backgroundColor: "#1c2330", borderRight: "1px solid #30363d" }}>
-              <span className="text-xs font-bold truncate px-1" style={{ color: "#e6edf3" }}>{guardDisplayName(g, gi, guards.length)}</span>
+              <span className="text-xs font-bold truncate px-1" style={{ color: "#e6edf3" }}>{guardFirstName(g, gi, guards.length)}</span>
             </div>
           ))}
         </div>
@@ -1002,11 +1007,11 @@ function buildScheduleCanvas(sched, guards) {
     ctx.fillStyle = "#30363d";
     ctx.fillRect(colX, GRID_Y, 1, HDR_H);
 
-    let name = guardDisplayName(g, gi, guards.length);
+    let name = guardFirstName(g, gi, guards.length);
     ctx.font = "bold 12px Arial";
     while (ctx.measureText(name).width > guardW - 10 && name.length > 2)
       name = name.slice(0, -1);
-    if (name !== guardDisplayName(g, gi, guards.length)) name += "…";
+    if (name !== guardFirstName(g, gi, guards.length)) name += "…";
 
     ctx.fillStyle    = "#e6edf3";
     ctx.textAlign    = "center";
@@ -1122,7 +1127,7 @@ function FullscreenTable({ sched, guards, onClose }) {
               style={{ backgroundColor: "#1c2330", borderRight: "1px solid #30363d" }}
             >
               <span className="font-bold truncate px-1" style={{ color: "#e6edf3", fontSize: 11 }}>
-                {guardDisplayName(g, gi, guards.length)}
+                {guardFirstName(g, gi, guards.length)}
               </span>
             </div>
           ))}
@@ -1164,26 +1169,30 @@ function FullscreenTable({ sched, guards, onClose }) {
 }
 
 // ─── Attendance Report ────────────────────────────────────────────────────────
-function AttendanceReport({ guards }) {
-  const SHIFTS = ["בוקר", "צהריים", "לילה"];
+const TAKKEN_FULL    = "מלא";
+const TAKKEN_SHORTAGE = "חוסר מאבטח לא חמוש בין 07:00–15:00";
+
+function AttendanceReport({ guards, isShortage }) {
+  const SHIFTS      = ["בוקר", "צהריים", "לילה"];
   const ROLE_OPTIONS = ['אחמ"ש', "מאבטח", "מאבטחת", "חמוש"];
-  const DAYS_HE = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
+  const DAYS_HE     = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
 
-  const defaultRoles = (gs) =>
-    gs.map(g => (g.level === "achmash" ? 'אחמ"ש' : "מאבטח"));
+  const defaultRoles  = (gs) => gs.map(g => (g.level === "achmash" ? 'אחמ"ש' : "מאבטח"));
+  const defaultStatus = (shortage) => shortage ? TAKKEN_SHORTAGE : TAKKEN_FULL;
 
-  const [open, setOpen]           = useState(false);
-  const [shift, setShift]         = useState("בוקר");
-  const [roles, setRoles]         = useState(() => defaultRoles(guards));
-  const [status, setStatus]       = useState("");
+  const [open, setOpen]             = useState(false);
+  const [shift, setShift]           = useState("בוקר");
+  const [roles, setRoles]           = useState(() => defaultRoles(guards));
+  const [status, setStatus]         = useState(() => defaultStatus(isShortage));
   const [reportText, setReportText] = useState("");
-  const [copied, setCopied]       = useState(false);
+  const [copied, setCopied]         = useState(false);
 
-  // Reset roles (and clear report) whenever the guard list changes
+  // Reset when guard list or shortage mode changes
   useEffect(() => {
     setRoles(defaultRoles(guards));
+    setStatus(defaultStatus(isShortage));
     setReportText("");
-  }, [guards]);
+  }, [guards, isShortage]);
 
   const updateRole = (i, val) =>
     setRoles(prev => prev.map((r, idx) => (idx === i ? val : r)));
@@ -1191,19 +1200,32 @@ function AttendanceReport({ guards }) {
   const generateReport = () => {
     const now     = new Date();
     const dayName = DAYS_HE[now.getDay()];
-    const dateStr = now.toLocaleDateString("he-IL", {
-      day: "numeric", month: "numeric", year: "numeric",
-    });
-    const guardLines = guards
-      .map((g, i) => `${guardDisplayName(g, i, guards.length)} – ${roles[i] || "מאבטח"}`)
-      .join("\n");
-    const text =
-`*דו"ח נוכחות – TLV62*
-📅 יום ${dayName}, ${dateStr}
-⏰ משמרת ${shift}
-תקן: ${status || "—"}
+    const day     = now.getDate();
+    const month   = now.getMonth() + 1;
+    const year    = now.getFullYear();
+    const dateStr = `${day}/${month}/${year}`;
 
-${guardLines}`;
+    const totalCount = guards.length + 2; // +2 חמושים
+
+    const guardLines = guards.map((g, i) =>
+      `*${i + 1}.* ${guardDisplayName(g, i, guards.length)} - (${roles[i] || "מאבטח"})`
+    );
+
+    const text = [
+      `*דו"ח נוכחות – TLV62*`,
+      ``,
+      `תאריך: ${dateStr}`,
+      `יום: ${dayName}`,
+      `משמרת: ${shift}`,
+      ``,
+      `*צוות 3:* (${totalCount})`,
+      ...guardLines,
+      `*${guards.length + 1}.* _____________ - (חמוש)`,
+      `*${guards.length + 2}.* _____________ - (חמוש)`,
+      ``,
+      `תקן: ${status}`,
+    ].join("\n");
+
     setReportText(text);
   };
 
@@ -1262,27 +1284,23 @@ ${guardLines}`;
             <div className="text-xs font-medium mb-1.5" style={{ color: "#8b949e" }}>תפקידים:</div>
             {guards.map((g, i) => (
               <div key={i} className="flex items-center gap-2 mb-1.5">
-                <span
-                  className="text-xs font-bold flex-1 truncate"
-                  style={{ color: "#e6edf3" }}
-                >
+                <span className="text-xs font-bold flex-1 truncate" style={{ color: "#e6edf3" }}>
                   {guardDisplayName(g, i, guards.length)}
                 </span>
                 <select
                   value={roles[i] || "מאבטח"}
                   onChange={e => updateRole(i, e.target.value)}
-                  className="text-xs rounded-lg px-2 py-1.5"
+                  className="rounded-lg px-2 py-1.5"
                   style={{
                     backgroundColor: "#1c2330",
                     border: "1px solid #30363d",
                     color: "#e6edf3",
                     minWidth: 100,
                     outline: "none",
+                    fontSize: 16,
                   }}
                 >
-                  {ROLE_OPTIONS.map(r => (
-                    <option key={r} value={r}>{r}</option>
-                  ))}
+                  {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
                 </select>
               </div>
             ))}
@@ -1292,15 +1310,16 @@ ${guardLines}`;
           <div className="mb-3">
             <div className="text-xs font-medium mb-1" style={{ color: "#8b949e" }}>תקן:</div>
             <input
-              className="w-full px-3 py-2 rounded-lg text-xs outline-none"
+              className="w-full px-3 py-2 rounded-lg outline-none"
               style={{
                 backgroundColor: "#1c2330",
                 border: "1px solid #30363d",
                 color: "#e6edf3",
+                fontSize: 16,
               }}
               value={status}
               onChange={e => setStatus(e.target.value)}
-              placeholder='למשל: 5/5'
+              placeholder="מלא / חוסר"
             />
           </div>
 
@@ -1317,15 +1336,16 @@ ${guardLines}`;
           {reportText && (
             <>
               <textarea
-                className="w-full px-3 py-2.5 rounded-lg text-xs outline-none resize-none mb-2"
+                className="w-full px-3 py-2.5 rounded-lg outline-none resize-none mb-2"
                 style={{
                   backgroundColor: "#0d1117",
                   border: "1px solid #30363d",
                   color: "#e6edf3",
-                  minHeight: 170,
+                  minHeight: 220,
                   direction: "rtl",
                   fontFamily: "monospace",
-                  lineHeight: 1.6,
+                  fontSize: 13,
+                  lineHeight: 1.65,
                 }}
                 value={reportText}
                 onChange={e => setReportText(e.target.value)}
@@ -1598,7 +1618,7 @@ export default function App() {
         {sched && <ValidationPanel errors={errors} isShortage={isShortage} />}
 
         {/* Attendance Report */}
-        {sched && <AttendanceReport guards={displayGuards} />}
+        {sched && <AttendanceReport guards={displayGuards} isShortage={isShortage} />}
 
         {/* Share */}
         {sched && (
