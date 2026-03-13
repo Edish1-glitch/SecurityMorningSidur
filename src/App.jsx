@@ -524,54 +524,62 @@ function GuardSetup({ guards, setGuards }) {
             opacity: g.isAbsent ? 0.75 : 1,
           }}
         >
-          {/* Name row + absent toggle */}
-          <div className="flex items-center gap-2 mb-2" style={{ direction: "rtl" }}>
-            <input
-              className="flex-1 text-center font-bold pb-1.5 bg-transparent outline-none"
-              style={{
-                color: g.isAbsent ? "#888" : "#e6edf3",
-                borderBottom: "1px solid #30363d",
-                fontSize: 16,
-              }}
-              value={g.name}
-              onChange={e => updateGuard(i, "name", e.target.value)}
-              placeholder={guardPlaceholder(i, guards.length)}
-            />
-            <button
-              className="flex-shrink-0 text-xs px-2 py-1 rounded-lg transition-all active:scale-95"
-              style={{
-                border: `1px solid ${g.isAbsent ? "#f85149" : "#30363d"}`,
-                backgroundColor: g.isAbsent ? "#f8514920" : "transparent",
-                color: g.isAbsent ? "#f85149" : "#555",
-                fontWeight: g.isAbsent ? 700 : 400,
-              }}
-              onClick={() => toggleAbsent(i)}
-            >
-              {g.isAbsent ? "✕ נעדר" : "נעדר"}
-            </button>
-          </div>
+          {/* Name — full width */}
+          <input
+            className="w-full text-center font-bold pb-1.5 mb-2 bg-transparent outline-none"
+            style={{
+              color: g.isAbsent ? "#888" : "#e6edf3",
+              borderBottom: "1px solid #30363d",
+              fontSize: 16,
+            }}
+            value={g.name}
+            onChange={e => updateGuard(i, "name", e.target.value)}
+            placeholder={guardPlaceholder(i, guards.length)}
+          />
 
-          {/* Level + Double row */}
+          {/* Controls row: [level buttons on left] | [כפולה + חוסר on right] */}
           <div className="flex flex-row-reverse items-center justify-between">
-            <button
-              className="flex items-center gap-1.5 text-xs rounded px-1 py-0.5 transition-all"
-              style={{ color: g.isDouble ? "#f0a500" : "#8b949e" }}
-              onClick={() => updateGuard(i, "isDouble", !g.isDouble)}
-            >
-              <span className="font-medium">כפולה</span>
-              <span
-                className="w-4 h-4 rounded flex-shrink-0 flex items-center justify-center"
-                style={{
-                  border: `1.5px solid ${g.isDouble ? "#f0a500" : "#30363d"}`,
-                  backgroundColor: g.isDouble ? "#f0a500" : "transparent",
-                  color: "#000",
-                  fontSize: 10,
-                  fontWeight: "bold",
-                }}
+            {/* Right group: כפולה + חוסר */}
+            <div className="flex items-center gap-2">
+              <button
+                className="flex items-center gap-1.5 text-xs rounded px-1 py-0.5 transition-all"
+                style={{ color: g.isDouble ? "#f0a500" : "#8b949e" }}
+                onClick={() => updateGuard(i, "isDouble", !g.isDouble)}
               >
-                {g.isDouble ? "✓" : ""}
-              </span>
-            </button>
+                <span className="font-medium">כפולה</span>
+                <span
+                  className="w-4 h-4 rounded flex-shrink-0 flex items-center justify-center"
+                  style={{
+                    border: `1.5px solid ${g.isDouble ? "#f0a500" : "#30363d"}`,
+                    backgroundColor: g.isDouble ? "#f0a500" : "transparent",
+                    color: "#000",
+                    fontSize: 10,
+                    fontWeight: "bold",
+                  }}
+                >
+                  {g.isDouble ? "✓" : ""}
+                </span>
+              </button>
+
+              {/* Divider */}
+              <div style={{ width: 1, height: 14, backgroundColor: "#30363d" }} />
+
+              {/* חוסר toggle */}
+              <button
+                className="text-xs px-2.5 py-1 rounded-md font-medium transition-all active:scale-95"
+                style={{
+                  border: `1px solid ${g.isAbsent ? "#f85149" : "#30363d"}`,
+                  backgroundColor: g.isAbsent ? "#f8514920" : "transparent",
+                  color: g.isAbsent ? "#f85149" : "#6e7681",
+                  minWidth: 44,
+                }}
+                onClick={() => toggleAbsent(i)}
+              >
+                {g.isAbsent ? "✕ חוסר" : "חוסר"}
+              </button>
+            </div>
+
+            {/* Left group: level buttons (non-gate only) */}
             {i < guards.length - 1 && (
               <div className="flex gap-1.5">
                 {["strong", "mid", "achmash"].map(lv => (
