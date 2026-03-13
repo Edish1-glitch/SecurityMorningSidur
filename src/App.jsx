@@ -1231,12 +1231,11 @@ const TAKKEN_FULL    = "מלא";
 const TAKKEN_SHORTAGE = "חוסר מאבטח לא חמוש בין 07:00–15:00";
 
 function AttendanceReport({ guards, isShortage, profile }) {
-  const SHIFTS       = ["בוקר", "צהריים", "לילה"];
   const ROLE_OPTIONS = ["מאבטח", "מאבטחת", "חמוש"];
   const DAYS_HE      = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
+  const shift        = "בוקר";
 
   const [open, setOpen]             = useState(false);
-  const [shift, setShift]           = useState("בוקר");
   const [roles, setRoles]           = useState(() => guards.map(() => "מאבטח"));
   const [status, setStatus]         = useState(() => isShortage ? TAKKEN_SHORTAGE : TAKKEN_FULL);
   const [reportText, setReportText] = useState("");
@@ -1312,27 +1311,6 @@ function AttendanceReport({ guards, isShortage, profile }) {
 
       {open && (
         <div className="px-3 pb-4" style={{ direction: "rtl" }}>
-
-          {/* Shift selector */}
-          <div className="mb-3">
-            <div className="text-xs font-medium mb-1.5" style={{ color: "#8b949e" }}>משמרת:</div>
-            <div className="flex gap-2">
-              {SHIFTS.map(s => (
-                <button
-                  key={s}
-                  className="flex-1 py-1.5 rounded-lg text-xs font-medium transition-all active:scale-95"
-                  style={{
-                    border: `1px solid ${shift === s ? "#58a6ff" : "#30363d"}`,
-                    backgroundColor: shift === s ? "#1a253540" : "transparent",
-                    color: shift === s ? "#58a6ff" : "#8b949e",
-                  }}
-                  onClick={() => setShift(s)}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
 
           {/* Guard roles — profile always #1 (locked), guards #2 onwards */}
           <div className="mb-3">
