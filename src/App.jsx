@@ -606,7 +606,7 @@ function GuardSetup({ guards, setGuards }) {
 }
 
 // ─── Shortage Panel ───────────────────────────────────────────────────────────
-function ShortagePanel({ absentGuard, absentIdx, totalGuards, gateDown, cicoDown, onCicoToggle }) {
+function ShortagePanel({ absentGuard, absentIdx, totalGuards, gateDown, cicoDown, onGateToggle, onCicoToggle }) {
   const absentName = guardDisplayName(absentGuard, absentIdx, totalGuards);
 
   const infoText = gateDown && cicoDown
@@ -635,14 +635,15 @@ function ShortagePanel({ absentGuard, absentIdx, totalGuards, gateDown, cicoDown
       <div className="text-xs mb-2 font-medium" style={{ color: "#8b949e" }}>הורד עמדות:</div>
       <div className="flex gap-3 flex-wrap mb-3">
 
-        {/* Gate toggle — auto-on when gate guard absent, dimmed otherwise */}
-        <div
-          className="flex items-center gap-2 px-3 py-2 rounded-lg"
+        {/* Gate toggle — auto-on when gate guard absent, manual otherwise */}
+        <button
+          className="flex items-center gap-2 px-3 py-2 rounded-lg transition-all active:scale-95"
           style={{
             border: `1px solid ${gateDown ? "#f0a500" : "#30363d"}`,
             backgroundColor: gateDown ? "#f0a50012" : "transparent",
-            opacity: absentGuard.isGate ? 1 : 0.4,
+            cursor: absentGuard.isGate ? "default" : "pointer",
           }}
+          onClick={absentGuard.isGate ? undefined : onGateToggle}
         >
           <span
             className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0"
@@ -657,7 +658,7 @@ function ShortagePanel({ absentGuard, absentIdx, totalGuards, gateDown, cicoDown
           <span className="text-xs font-medium" style={{ color: gateDown ? "#f0a500" : "#8b949e" }}>
             שער{absentGuard.isGate ? " (אוטומטי)" : ""}
           </span>
-        </div>
+        </button>
 
         {/* CICO toggle */}
         <button
@@ -1081,25 +1082,36 @@ export default function App() {
   const [sharing, setSharing] = useState(false);
   const [origSched, setOrigSched] = useState(null);
   const [cicoDown, setCicoDown] = useState(false);
+  const [gateDownManual, setGateDownManual] = useState(false);
 
   // Derived: active guards (those not absent) and shortage config
   const absentGuard = useMemo(() => guards.find(g => g.isAbsent) ?? null, [guards]);
   const absentIdx   = useMemo(() => guards.findIndex(g => g.isAbsent), [guards]);
   const isShortage  = !!absentGuard;
   const displayGuards = useMemo(() => guards.filter(g => !g.isAbsent), [guards]);
+  // Gate is auto-forced when gate guard is absent; otherwise manually controlled
+  const gateDown = absentGuard?.isGate ? true : gateDownManual;
   const effectiveCfg  = useMemo(() => ({
-    gateDown:   absentGuard?.isGate ?? false,
+    gateDown,
     cicoDown,
     isShortage,
-  }), [absentGuard, cicoDown, isShortage]);
+  }), [gateDown, cicoDown, isShortage]);
 
-  // Clear schedule when active guard count changes (absence toggled)
+  // Clear schedule + reset manual toggles when active guard count changes
   const activeCount = displayGuards.length;
   useEffect(() => {
     setSched(null);
     setErrors([]);
     setOrigSched(null);
+    setGateDownManual(false);
+    setCicoDown(false);
   }, [activeCount]);
+
+  // Also reset manual toggles when switching which guard is absent
+  useEffect(() => {
+    setGateDownManual(false);
+    setCicoDown(false);
+  }, [absentIdx]);
 
   const handleGenerate = useCallback(() => {
     setGenerating(true);
@@ -1211,8 +1223,9 @@ export default function App() {
             absentGuard={absentGuard}
             absentIdx={absentIdx}
             totalGuards={guards.length}
-            gateDown={effectiveCfg.gateDown}
+            gateDown={gateDown}
             cicoDown={cicoDown}
+            onGateToggle={() => setGateDownManual(v => !v)}
             onCicoToggle={() => setCicoDown(v => !v)}
           />
         )}
