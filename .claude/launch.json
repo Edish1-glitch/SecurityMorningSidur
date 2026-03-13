@@ -3,9 +3,10 @@
   "configurations": [
     {
       "name": "SecurityMorningSidur",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "--port", "5174"],
-      "port": 5174
+      "runtimeExecutable": "/tmp/node-v20.18.2-darwin-arm64/bin/npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 5174,
+      "autoPort": true
     }
   ]
 }

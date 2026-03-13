@@ -1163,6 +1163,205 @@ function FullscreenTable({ sched, guards, onClose }) {
   );
 }
 
+// ─── Attendance Report ────────────────────────────────────────────────────────
+function AttendanceReport({ guards }) {
+  const SHIFTS = ["בוקר", "צהריים", "לילה"];
+  const ROLE_OPTIONS = ['אחמ"ש', "מאבטח", "מאבטחת", "חמוש"];
+  const DAYS_HE = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
+
+  const defaultRoles = (gs) =>
+    gs.map(g => (g.level === "achmash" ? 'אחמ"ש' : "מאבטח"));
+
+  const [open, setOpen]           = useState(false);
+  const [shift, setShift]         = useState("בוקר");
+  const [roles, setRoles]         = useState(() => defaultRoles(guards));
+  const [status, setStatus]       = useState("");
+  const [reportText, setReportText] = useState("");
+  const [copied, setCopied]       = useState(false);
+
+  // Reset roles (and clear report) whenever the guard list changes
+  useEffect(() => {
+    setRoles(defaultRoles(guards));
+    setReportText("");
+  }, [guards]);
+
+  const updateRole = (i, val) =>
+    setRoles(prev => prev.map((r, idx) => (idx === i ? val : r)));
+
+  const generateReport = () => {
+    const now     = new Date();
+    const dayName = DAYS_HE[now.getDay()];
+    const dateStr = now.toLocaleDateString("he-IL", {
+      day: "numeric", month: "numeric", year: "numeric",
+    });
+    const guardLines = guards
+      .map((g, i) => `${guardDisplayName(g, i, guards.length)} – ${roles[i] || "מאבטח"}`)
+      .join("\n");
+    const text =
+`*דו"ח נוכחות – TLV62*
+📅 יום ${dayName}, ${dateStr}
+⏰ משמרת ${shift}
+תקן: ${status || "—"}
+
+${guardLines}`;
+    setReportText(text);
+  };
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(reportText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard not available — silently ignore
+    }
+  };
+
+  const handleWhatsApp = () => {
+    window.open(`https://wa.me/?text=${encodeURIComponent(reportText)}`, "_blank");
+  };
+
+  return (
+    <div className="rounded-xl mb-4" style={{ backgroundColor: "#161b22", border: "1px solid #30363d" }}>
+      {/* Toggle header */}
+      <button
+        className="w-full p-3 text-center text-xs transition-all"
+        style={{ color: "#8b949e" }}
+        onClick={() => setOpen(v => !v)}
+      >
+        <span style={{ color: "#e6edf3", fontWeight: 700 }}>📋 דו"ח נוכחות </span>
+        <span>{open ? "▲" : "▼"}</span>
+      </button>
+
+      {open && (
+        <div className="px-3 pb-4" style={{ direction: "rtl" }}>
+
+          {/* Shift selector */}
+          <div className="mb-3">
+            <div className="text-xs font-medium mb-1.5" style={{ color: "#8b949e" }}>משמרת:</div>
+            <div className="flex gap-2">
+              {SHIFTS.map(s => (
+                <button
+                  key={s}
+                  className="flex-1 py-1.5 rounded-lg text-xs font-medium transition-all active:scale-95"
+                  style={{
+                    border: `1px solid ${shift === s ? "#58a6ff" : "#30363d"}`,
+                    backgroundColor: shift === s ? "#1a253540" : "transparent",
+                    color: shift === s ? "#58a6ff" : "#8b949e",
+                  }}
+                  onClick={() => setShift(s)}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Guard roles */}
+          <div className="mb-3">
+            <div className="text-xs font-medium mb-1.5" style={{ color: "#8b949e" }}>תפקידים:</div>
+            {guards.map((g, i) => (
+              <div key={i} className="flex items-center gap-2 mb-1.5">
+                <span
+                  className="text-xs font-bold flex-1 truncate"
+                  style={{ color: "#e6edf3" }}
+                >
+                  {guardDisplayName(g, i, guards.length)}
+                </span>
+                <select
+                  value={roles[i] || "מאבטח"}
+                  onChange={e => updateRole(i, e.target.value)}
+                  className="text-xs rounded-lg px-2 py-1.5"
+                  style={{
+                    backgroundColor: "#1c2330",
+                    border: "1px solid #30363d",
+                    color: "#e6edf3",
+                    minWidth: 100,
+                    outline: "none",
+                  }}
+                >
+                  {ROLE_OPTIONS.map(r => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
+              </div>
+            ))}
+          </div>
+
+          {/* תקן */}
+          <div className="mb-3">
+            <div className="text-xs font-medium mb-1" style={{ color: "#8b949e" }}>תקן:</div>
+            <input
+              className="w-full px-3 py-2 rounded-lg text-xs outline-none"
+              style={{
+                backgroundColor: "#1c2330",
+                border: "1px solid #30363d",
+                color: "#e6edf3",
+              }}
+              value={status}
+              onChange={e => setStatus(e.target.value)}
+              placeholder='למשל: 5/5'
+            />
+          </div>
+
+          {/* Generate */}
+          <button
+            className="w-full py-2.5 rounded-xl text-sm font-extrabold mb-3 transition-all active:scale-95"
+            style={{ backgroundColor: "#f0a500", color: "#000" }}
+            onClick={generateReport}
+          >
+            📋 צור דו"ח
+          </button>
+
+          {/* Editable report + actions */}
+          {reportText && (
+            <>
+              <textarea
+                className="w-full px-3 py-2.5 rounded-lg text-xs outline-none resize-none mb-2"
+                style={{
+                  backgroundColor: "#0d1117",
+                  border: "1px solid #30363d",
+                  color: "#e6edf3",
+                  minHeight: 170,
+                  direction: "rtl",
+                  fontFamily: "monospace",
+                  lineHeight: 1.6,
+                }}
+                value={reportText}
+                onChange={e => setReportText(e.target.value)}
+              />
+              <div className="flex gap-2">
+                <button
+                  className="flex-1 py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
+                  style={{
+                    backgroundColor: copied ? "#0f1f10" : "#1c2330",
+                    border: `1px solid ${copied ? "#3fb950" : "#30363d"}`,
+                    color: copied ? "#3fb950" : "#e6edf3",
+                  }}
+                  onClick={handleCopy}
+                >
+                  {copied ? "✅ הועתק!" : "📋 העתק"}
+                </button>
+                <button
+                  className="flex-1 py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
+                  style={{
+                    backgroundColor: "#1a3a25",
+                    border: "1px solid #25d366",
+                    color: "#25d366",
+                  }}
+                  onClick={handleWhatsApp}
+                >
+                  📲 שלח לוואטסאפ
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [guards, setGuards] = useState(DEFAULT_GUARDS.map(g => ({ ...g })));
@@ -1397,6 +1596,9 @@ export default function App() {
 
         {/* Validation */}
         {sched && <ValidationPanel errors={errors} isShortage={isShortage} />}
+
+        {/* Attendance Report */}
+        {sched && <AttendanceReport guards={displayGuards} />}
 
         {/* Share */}
         {sched && (
