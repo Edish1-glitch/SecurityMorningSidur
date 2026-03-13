@@ -1239,7 +1239,19 @@ export default function App() {
       const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
       const file = new File([blob], "sidur-avtaha.png", { type: "image/png" });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: "טבלת השיבוץ" });
+        const shareText =
+`בוקר טוב *משמרת בוקר*
+
+*תדריך ב 06:50 בשער*
+*במצב של איחור יש להתקשר!!!*
+
+*חמושים:*
+
+
+
+*שימו לב לסיורים*
+*משמרת נעימה לכולם* 🚀`;
+        await navigator.share({ files: [file], title: "סידור אבטחה", text: shareText });
       } else {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
