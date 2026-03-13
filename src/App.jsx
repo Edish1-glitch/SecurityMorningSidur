@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 // ─── Constants ────────────────────────────────────────────────────────────────
 const HOURS = [
   "07:00-08:00","08:00-09:00","09:00-10:00","10:00-11:00",
@@ -17,7 +17,8 @@ const SC = {
   shaar:     { bg: "#2a1515", text: "#fca5a5", border: "#f85149" },
 };
 const REST = new Set(["break", "malshinon", "shaar"]);
-// ─── Scheduling Logic (unchanged) ────────────────────────────────────────────
+
+// ─── Scheduling Logic ─────────────────────────────────────────────────────────
 function mulberry32(seed) {
   return function () {
     seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
@@ -26,13 +27,23 @@ function mulberry32(seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-function assignable(h) {
+
+// cfg = { gateDown, cicoDown, isShortage, maxRest }
+function assignable(h, cfg = {}) {
   const s = ["lenel", "bosh", "break"];
-  if (h > 0) s.push("cico");
-  if (h === 0 || h >= 3) s.push("malshinon");
-  if (h <= 2) s.push("shaar");
+  if (h > 0 && !cfg.cicoDown) s.push("cico");
+  // Malshinon hours shift when gate is down
+  if (cfg.gateDown && cfg.cicoDown) {
+    s.push("malshinon"); // all hours: gate+CICO both down
+  } else if (cfg.gateDown) {
+    if (h <= 2) s.push("malshinon"); // gate down only: 07–10
+  } else {
+    if (h === 0 || h >= 3) s.push("malshinon"); // normal
+  }
+  if (!cfg.gateDown && h <= 2) s.push("shaar");
   return s;
 }
+
 function consec(h, g, sched) {
   let c = 0;
   for (let i = h - 1; i >= 0; i--) {
@@ -40,6 +51,7 @@ function consec(h, g, sched) {
   }
   return c;
 }
+
 function cicoLimit(gIdx, guards) {
   const g = guards[gIdx];
   const achmashCount = guards.filter(x => x.level === "achmash").length;
@@ -47,7 +59,6 @@ function cicoLimit(gIdx, guards) {
   const nonAchmashCount = nonAchmash.length;
 
   if (g.level === "achmash") {
-    // Achmash can do CICO only when non-achmash guards can't cover all 7 slots
     if (nonAchmashCount === 0) return Math.ceil(7 / achmashCount);
     const nonAchmashCapacity = nonAchmash.reduce((sum, _, i) => {
       const realIdx = guards.indexOf(nonAchmash[i]);
@@ -67,10 +78,6 @@ function cicoLimit(gIdx, guards) {
     return Math.ceil(7 / nonAchmashCount);
   }
 
-  // No achmash: base limits (strong=1, mid=2) were designed for the classic
-  // 2-strong + 2-mid + 1-gate composition (total = 7). For other compositions
-  // the total capacity may fall short of 7, leaving a CICO hour uncovered and
-  // causing duplicate breaks. Boost all non-gate guards evenly to close the gap.
   const baseLimit = g.level === "strong" ? 1 : 2;
   const totalCapacity = guards.reduce((sum, guard) => {
     if (guard.level === "achmash") return sum;
@@ -81,8 +88,9 @@ function cicoLimit(gIdx, guards) {
   if (nonGateEligible === 0) return baseLimit;
   return baseLimit + Math.ceil((7 - totalCapacity) / nonGateEligible);
 }
-function canPlaceFix(h, g, st, sched, guards) {
-  if (!assignable(h).includes(st)) return false;
+
+function canPlaceFix(h, g, st, sched, guards, cfg = {}) {
+  if (!assignable(h, cfg).includes(st)) return false;
   if (h > 0 && sched[h - 1][g] === "cico" && st !== "break") return false;
   if (!REST.has(st) && consec(h, g, sched) >= 3) return false;
   if (st === "cico") {
@@ -91,24 +99,25 @@ function canPlaceFix(h, g, st, sched, guards) {
   }
   if (st === "malshinon" && h > 0 && sched[h - 1][g] === "malshinon") return false;
   if (st === "malshinon" && h < 7 && sched[h + 1][g] === "malshinon") return false;
-  // No consecutive breaks for the same guard
   if (st === "break" && h > 0 && sched[h - 1][g] === "break") return false;
-  // All stations (including break) must be unique per hour — max 1 guard per station per hour
   if (sched[h].some((s, gi) => gi !== g && s === st)) return false;
   return true;
 }
-function validateSched(sched, guards) {
+
+function validateSched(sched, guards, cfg = {}) {
+  const maxRest = cfg.maxRest || 3;
   const errs = [];
   const achmashCount = guards.filter(x => x.level === "achmash").length;
+
   for (let h = 0; h < 8; h++) {
     const seen = {};
     sched[h].forEach((s) => {
-      // All stations including break must be unique per hour (max 1 guard per station)
       if (!s) return;
       if (seen[s]) errs.push(`כפילות ב-${HOURS[h]}: ${SL[s] || s}`);
       seen[s] = true;
     });
   }
+
   guards.forEach((guard, g) => {
     const gName = guardDisplayName(guard, g, guards.length);
     const row = sched.map(r => r[g]);
@@ -121,7 +130,6 @@ function validateSched(sched, guards) {
       if (row[h] === "cico" && row[h + 1] && row[h + 1] !== "break")
         errs.push(`${gName}: אחרי CICO ללא הפסקה`);
     }
-    // No two consecutive break hours
     for (let h = 0; h < 7; h++) {
       if (row[h] === "break" && row[h + 1] === "break")
         errs.push(`${gName}: הפסקות ברצף@${HOURS[h]}`);
@@ -135,28 +143,38 @@ function validateSched(sched, guards) {
       if (row[h] === "malshinon" && row[h + 1] === "malshinon")
         errs.push(`${gName}: מלשינון רצוף@${HOURS[h]}`);
     }
+
+    // Required stations per guard (shortage mode relaxes malshinon requirement)
     if (guard.level === "achmash") {
-      // When 2+ achmash, they must also do CICO for fairness
-      const required = ["lenel", "bosh", "malshinon", "break"];
-      if (achmashCount >= 2) required.push("cico");
+      const required = ["lenel", "bosh", "break"];
+      if (achmashCount >= 2 && !cfg.cicoDown) required.push("cico");
+      if (!cfg.isShortage) required.push("malshinon");
       required.forEach(r => {
         if (!row.includes(r)) errs.push(`${gName}: חסר ${SL[r] || r}`);
       });
     } else if (guard.isGate) {
-      if (!row.includes("cico")) errs.push(`${gName}: חסר CICO`);
+      if (!cfg.cicoDown && !row.includes("cico")) errs.push(`${gName}: חסר CICO`);
     } else {
-      ["lenel", "bosh", "cico", "malshinon", "break"].forEach(r => {
+      const required = ["lenel", "bosh", "break"];
+      if (!cfg.cicoDown) required.push("cico");
+      if (!cfg.isShortage) required.push("malshinon");
+      required.forEach(r => {
         if (!row.includes(r)) errs.push(`${gName}: חסר ${SL[r] || r}`);
       });
     }
-    // Rest-hour cap: break + malshinon ≤ 3 for all guards
+
+    // In shortage mode the rest cap is omitted — fewer guards means more rest is unavoidable.
+    // The balance check (below) ensures fairness between guards.
     const restCnt = row.filter(s => s === "break" || s === "malshinon").length;
-    if (restCnt > 3) errs.push(`${gName}: ${restCnt} שעות מנוחה (מקס׳ 3)`);
+    if (!cfg.isShortage && restCnt > maxRest)
+      errs.push(`${gName}: ${restCnt} שעות מנוחה (מקס׳ ${maxRest})`);
   });
+
   for (let h = 0; h < 8; h++) {
     if (!sched[h].includes("lenel")) errs.push(`${HOURS[h]}: Lenel לא מאויישת`);
     if (!sched[h].includes("bosh"))  errs.push(`${HOURS[h]}: Bosh לא מאויישת`);
   }
+
   const nonGate = guards.map((g, i) => ({ g, i })).filter(({ g }) => !g.isGate);
   if (nonGate.length > 1) {
     const restCounts = nonGate.map(({ i }) => {
@@ -169,7 +187,8 @@ function validateSched(sched, guards) {
   }
   return errs;
 }
-function tryGen(seed, guards) {
+
+function tryGen(seed, guards, cfg = {}) {
   const rand = mulberry32(seed);
   const N = guards.length;
   const sched = Array.from({ length: 8 }, () => Array(N).fill(""));
@@ -190,31 +209,39 @@ function tryGen(seed, guards) {
     }
     return c;
   };
+
+  // Gate guard gets shaar only if station is active
   guards.forEach((g, gi) => {
-    if (g.isGate) for (let h = 0; h < 3; h++) sched[h][gi] = "shaar";
+    if (g.isGate && !cfg.gateDown) for (let h = 0; h < 3; h++) sched[h][gi] = "shaar";
     if (g.isDouble) sched[7][gi] = "cico";
   });
-  const achmashCount = guards.filter(x => x.level === "achmash").length;
-  const cicoGuards = shuffle(Array.from({ length: N }, (_, i) => i))
-    .filter(g => guards[g].level !== "achmash" || achmashCount >= 2);
-  for (const g of cicoGuards) {
-    const lim = cicoLimit(g, guards);
-    const cur = sched.map(r => r[g]).filter(s => s === "cico").length;
-    const need = lim - cur;
-    if (need <= 0) continue;
-    const validHours = shuffle([1, 2, 3, 4, 5, 6, 7]).filter(h =>
-      free(h, g) && !sched[h].includes("cico") && activeConsec(h, g) < 3
-    );
-    let assigned = 0;
-    for (const h of validHours) {
-      if (assigned >= need) break;
-      if (h < 7 && !free(h + 1, g) && sched[h + 1][g] !== "break") continue;
-      if (h < 7 && free(h + 1, g) && sched[h + 1].includes("break")) continue;
-      sched[h][g] = "cico";
-      if (h < 7 && free(h + 1, g)) sched[h + 1][g] = "break";
-      assigned++;
+
+  // CICO assignment (skip entirely if cicoDown)
+  if (!cfg.cicoDown) {
+    const achmashCount = guards.filter(x => x.level === "achmash").length;
+    const cicoGuards = shuffle(Array.from({ length: N }, (_, i) => i))
+      .filter(g => guards[g].level !== "achmash" || achmashCount >= 2);
+    for (const g of cicoGuards) {
+      const lim = cicoLimit(g, guards);
+      const cur = sched.map(r => r[g]).filter(s => s === "cico").length;
+      const need = lim - cur;
+      if (need <= 0) continue;
+      const validHours = shuffle([1, 2, 3, 4, 5, 6, 7]).filter(h =>
+        free(h, g) && !sched[h].includes("cico") && activeConsec(h, g) < 3
+      );
+      let assigned = 0;
+      for (const h of validHours) {
+        if (assigned >= need) break;
+        if (h < 7 && !free(h + 1, g) && sched[h + 1][g] !== "break") continue;
+        if (h < 7 && free(h + 1, g) && sched[h + 1].includes("break")) continue;
+        sched[h][g] = "cico";
+        if (h < 7 && free(h + 1, g)) sched[h + 1][g] = "break";
+        assigned++;
+      }
     }
   }
+
+  // Lenel
   for (const h of shuffle([0, 1, 2, 3, 4, 5, 6, 7])) {
     if (sched[h].includes("lenel")) continue;
     const cands = shuffle(Array.from({ length: N }, (_, i) => i)).filter(g =>
@@ -222,6 +249,8 @@ function tryGen(seed, guards) {
     );
     if (cands.length) sched[h][cands[0]] = "lenel";
   }
+
+  // Bosh
   for (const h of shuffle([0, 1, 2, 3, 4, 5, 6, 7])) {
     if (sched[h].includes("bosh")) continue;
     const cands = shuffle(Array.from({ length: N }, (_, i) => i)).filter(g =>
@@ -229,22 +258,28 @@ function tryGen(seed, guards) {
     );
     if (cands.length) sched[h][cands[0]] = "bosh";
   }
-  for (const h of shuffle([0, 3, 4, 5, 6, 7])) {
+
+  // Malshinon — hours depend on cfg
+  const malsHours = cfg.gateDown && cfg.cicoDown
+    ? [0, 1, 2, 3, 4, 5, 6, 7]
+    : cfg.gateDown
+      ? [0, 1, 2]
+      : [0, 3, 4, 5, 6, 7];
+
+  const maxRest = cfg.maxRest || 3;
+  for (const h of shuffle(malsHours)) {
     if (sched[h].includes("malshinon")) continue;
     const cands = shuffle(Array.from({ length: N }, (_, i) => i)).filter(g => {
       if (!free(h, g) || needsBreak(h, g)) return false;
-      // Projected rest if we assign malshinon here:
-      // (curMals+1) + curBreaks + (emptySlots-1) where emptySlots includes slot h
       const curMals   = sched.map(r => r[g]).filter(s => s === "malshinon").length;
       const curBreaks = sched.map(r => r[g]).filter(s => s === "break").length;
       const emptySlots = sched.map(r => r[g]).filter(s => !s).length;
-      return (curMals + 1) + curBreaks + (emptySlots - 1) <= 3;
+      return (curMals + 1) + curBreaks + (emptySlots - 1) <= maxRest;
     });
     if (cands.length) sched[h][cands[0]] = "malshinon";
   }
-  // Fill remaining empty slots: prefer malshinon where valid, else break.
-  // Never assign break if another guard already has break that hour.
-  // Never assign malshinon if another guard already has malshinon that hour.
+
+  // Fill remaining empty slots
   for (let h = 0; h < 8; h++) {
     for (let g = 0; g < N; g++) {
       if (sched[h][g]) continue;
@@ -253,9 +288,8 @@ function tryGen(seed, guards) {
       const prevMals       = h > 0 && sched[h - 1][g] === "malshinon";
       const prevBreak      = h > 0 && sched[h - 1][g] === "break";
       const nextMals       = h < 7 && sched[h + 1][g] === "malshinon";
-      const malsValid = (h === 0 || h >= 3) && !prevMals && !nextMals && !hourMalsTaken;
+      const malsValid = malsHours.includes(h) && !prevMals && !nextMals && !hourMalsTaken;
       if (malsValid && prevBreak) {
-        // Prefer malshinon after a break to avoid consecutive breaks
         sched[h][g] = "malshinon";
       } else if (!hourBreakTaken && !prevBreak) {
         sched[h][g] = "break";
@@ -268,28 +302,37 @@ function tryGen(seed, guards) {
   }
   return sched;
 }
-function postFix(sched, guards) {
+
+function postFix(sched, guards, cfg = {}) {
+  const maxRest = cfg.maxRest || 3;
   for (let iter = 0; iter < 20; iter++) {
     let improved = false;
-    const errs = validateSched(sched, guards);
+    const errs = validateSched(sched, guards, cfg);
     if (!errs.length) break;
 
     // Pass 1: assign missing required stations per guard
     const achmashCount = guards.filter(x => x.level === "achmash").length;
     for (let g = 0; g < guards.length && !improved; g++) {
-      const needed = guards[g].level === "achmash"
-        ? (achmashCount >= 2 ? ["lenel", "bosh", "malshinon", "break", "cico"] : ["lenel", "bosh", "malshinon", "break"])
-        : guards[g].isGate
-          ? ["cico"]
-          : ["lenel", "bosh", "malshinon", "cico", "break"];
+      let needed;
+      if (guards[g].level === "achmash") {
+        needed = ["lenel", "bosh", "break"];
+        if (achmashCount >= 2 && !cfg.cicoDown) needed.push("cico");
+        if (!cfg.isShortage) needed.push("malshinon");
+      } else if (guards[g].isGate) {
+        needed = cfg.cicoDown ? [] : ["cico"];
+      } else {
+        needed = ["lenel", "bosh", "break"];
+        if (!cfg.cicoDown) needed.push("cico");
+        if (!cfg.isShortage) needed.push("malshinon");
+      }
       for (const need of needed) {
         if (sched.map(r => r[g]).includes(need)) continue;
         for (let h = 0; h < 8; h++) {
           const cur = sched[h][g];
           if (cur === "shaar" || cur === need) continue;
           sched[h][g] = need;
-          if (canPlaceFix(h, g, need, sched, guards) &&
-              validateSched(sched, guards).length < errs.length) {
+          if (canPlaceFix(h, g, need, sched, guards, cfg) &&
+              validateSched(sched, guards, cfg).length < errs.length) {
             improved = true; break;
           }
           sched[h][g] = cur;
@@ -298,18 +341,17 @@ function postFix(sched, guards) {
       }
     }
 
-    // Pass 2: fix simultaneous breaks — swap break with another rest type
+    // Pass 2: fix simultaneous breaks → swap to malshinon
     for (let h = 0; h < 8 && !improved; h++) {
       const breakGuards = sched[h].map((s, gi) => gi).filter(gi => sched[h][gi] === "break");
       if (breakGuards.length <= 1) continue;
-      // Try to swap extra break-holders to malshinon
       for (let k = 1; k < breakGuards.length && !improved; k++) {
         const g = breakGuards[k];
         if (sched[h][g] === "shaar") continue;
         const prev = sched[h][g];
         sched[h][g] = "malshinon";
-        if (canPlaceFix(h, g, "malshinon", sched, guards) &&
-            validateSched(sched, guards).length < errs.length) {
+        if (canPlaceFix(h, g, "malshinon", sched, guards, cfg) &&
+            validateSched(sched, guards, cfg).length < errs.length) {
           improved = true;
         } else {
           sched[h][g] = prev;
@@ -320,7 +362,7 @@ function postFix(sched, guards) {
     // Pass 3: fix rest-limit violations via swap
     for (let g = 0; g < guards.length && !improved; g++) {
       const restCnt = sched.map(r => r[g]).filter(s => s === "break" || s === "malshinon").length;
-      if (restCnt <= 3) continue;
+      if (restCnt <= maxRest) continue;
       for (let h = 0; h < 8 && !improved; h++) {
         const curSt = sched[h][g];
         if (curSt !== "break" && curSt !== "malshinon") continue;
@@ -329,38 +371,39 @@ function postFix(sched, guards) {
           const st2 = sched[h][g2];
           if (!st2 || REST.has(st2)) continue;
           const rested2 = sched.map(r => r[g2]).filter(s => s === "break" || s === "malshinon").length;
-          if (rested2 >= 3) continue;
+          if (rested2 >= maxRest) continue;
           sched[h][g]  = st2;
           sched[h][g2] = curSt;
-          if (validateSched(sched, guards).length < errs.length) { improved = true; break; }
+          if (validateSched(sched, guards, cfg).length < errs.length) { improved = true; break; }
           sched[h][g]  = curSt;
           sched[h][g2] = st2;
         }
       }
     }
-    // Pass 4: fix consecutive breaks — replace one with malshinon
+
+    // Pass 4: fix consecutive breaks → replace with malshinon
     for (let g = 0; g < guards.length && !improved; g++) {
       for (let h = 1; h < 8 && !improved; h++) {
         if (sched[h][g] !== "break" || sched[h - 1][g] !== "break") continue;
-        if (assignable(h).includes("malshinon") &&
+        if (assignable(h, cfg).includes("malshinon") &&
             !sched[h].some((s, gi) => gi !== g && s === "malshinon") &&
             !(h < 7 && sched[h + 1][g] === "malshinon")) {
           sched[h][g] = "malshinon";
-          if (validateSched(sched, guards).length < errs.length) { improved = true; break; }
+          if (validateSched(sched, guards, cfg).length < errs.length) { improved = true; break; }
           sched[h][g] = "break";
         }
         if (!improved &&
-            assignable(h - 1).includes("malshinon") &&
+            assignable(h - 1, cfg).includes("malshinon") &&
             !sched[h - 1].some((s, gi) => gi !== g && s === "malshinon") &&
             !(h > 1 && sched[h - 2][g] === "malshinon")) {
           sched[h - 1][g] = "malshinon";
-          if (validateSched(sched, guards).length < errs.length) { improved = true; break; }
+          if (validateSched(sched, guards, cfg).length < errs.length) { improved = true; break; }
           sched[h - 1][g] = "break";
         }
       }
     }
 
-    // Pass 5: generic pairwise swap — try any two cells in same hour
+    // Pass 5: generic pairwise swap in same hour
     for (let h = 0; h < 8 && !improved; h++) {
       for (let g = 0; g < guards.length && !improved; g++) {
         for (let g2 = g + 1; g2 < guards.length && !improved; g2++) {
@@ -368,9 +411,9 @@ function postFix(sched, guards) {
           if (!s1 || !s2 || s1 === s2) continue;
           if (s1 === "shaar" || s2 === "shaar") continue;
           sched[h][g] = s2; sched[h][g2] = s1;
-          if (canPlaceFix(h, g, s2, sched, guards) &&
-              canPlaceFix(h, g2, s1, sched, guards) &&
-              validateSched(sched, guards).length < errs.length) {
+          if (canPlaceFix(h, g, s2, sched, guards, cfg) &&
+              canPlaceFix(h, g2, s1, sched, guards, cfg) &&
+              validateSched(sched, guards, cfg).length < errs.length) {
             improved = true;
           } else {
             sched[h][g] = s1; sched[h][g2] = s2;
@@ -382,18 +425,33 @@ function postFix(sched, guards) {
     if (!improved) break;
   }
 }
-function generate(guards) {
-  let bestSched = null;
-  let bestErrs = 9999;
-  for (let seed = 0; seed < 3000; seed++) {
-    const s = tryGen(seed, guards);
-    postFix(s, guards);
-    const e = validateSched(s, guards).length;
-    if (e < bestErrs) { bestErrs = e; bestSched = s.map(r => [...r]); }
-    if (bestErrs === 0) break;
+
+function generate(guards, cfg = {}) {
+  const tryWith = (mr) => {
+    const c = { ...cfg, maxRest: mr };
+    let best = null, bestE = 9999;
+    for (let seed = 0; seed < 3000; seed++) {
+      const s = tryGen(seed, guards, c);
+      postFix(s, guards, c);
+      const e = validateSched(s, guards, c).length;
+      if (e < bestE) { bestE = e; best = s.map(r => [...r]); }
+      if (bestE === 0) break;
+    }
+    return { sched: best, errs: bestE };
+  };
+
+  // In shortage mode: no hard rest cap (validateSched skips it).
+  // Use a high maxRest so tryGen doesn't over-constrain malshinon assignment.
+  // Fairness is enforced by the balance check in validateSched.
+  if (cfg.isShortage) {
+    const r = tryWith(8);
+    return r.sched ?? Array.from({ length: 8 }, () => Array(guards.length).fill(""));
   }
-  return bestSched ?? Array.from({ length: 8 }, () => Array(guards.length).fill(""));
+
+  const r = tryWith(cfg.maxRest || 3);
+  return r.sched ?? Array.from({ length: 8 }, () => Array(guards.length).fill(""));
 }
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function levelColor(level) {
   return level === "strong" ? "#3fb950" : level === "achmash" ? "#58a6ff" : "#f0a500";
@@ -408,12 +466,13 @@ function guardDisplayName(g, i, total) {
   return g.name || guardPlaceholder(i, total);
 }
 const DEFAULT_GUARDS = [
-  { name: "", level: "strong", isDouble: false, isGate: false },
-  { name: "", level: "strong", isDouble: false, isGate: false },
-  { name: "", level: "mid",    isDouble: false, isGate: false },
-  { name: "", level: "mid",    isDouble: false, isGate: false },
-  { name: "", level: "mid",    isDouble: false, isGate: true  },
+  { name: "", level: "strong", isDouble: false, isGate: false, isAbsent: false },
+  { name: "", level: "strong", isDouble: false, isGate: false, isAbsent: false },
+  { name: "", level: "mid",    isDouble: false, isGate: false, isAbsent: false },
+  { name: "", level: "mid",    isDouble: false, isGate: false, isAbsent: false },
+  { name: "", level: "mid",    isDouble: false, isGate: true,  isAbsent: false },
 ];
+
 // ─── Components ───────────────────────────────────────────────────────────────
 function StationBadge({ station, size = "md" }) {
   const col = SC[station];
@@ -428,6 +487,7 @@ function StationBadge({ station, size = "md" }) {
     </span>
   );
 }
+
 function Legend() {
   return (
     <div className="flex flex-row-reverse flex-wrap gap-2 justify-center mb-3">
@@ -440,23 +500,59 @@ function Legend() {
     </div>
   );
 }
-function GuardSetup({ guards, setGuards, onGenerate, generating }) {
+
+function GuardSetup({ guards, setGuards }) {
   const updateGuard = (i, field, val) =>
     setGuards(prev => prev.map((g, idx) => idx === i ? { ...g, [field]: val } : g));
+
+  const toggleAbsent = (i) =>
+    setGuards(prev => prev.map((g, idx) => ({
+      ...g,
+      isAbsent: idx === i ? !g.isAbsent : false,
+    })));
+
   return (
     <div className="rounded-2xl p-4 mb-4" style={{ backgroundColor: "#161b22", border: "1px solid #30363d" }}>
       <h2 className="text-sm font-bold mb-3 text-center" style={{ color: "#f0a500" }}>⚙️ הגדרת הצוות</h2>
       {guards.map((g, i) => (
-        <div key={i} className="rounded-xl p-3 mb-2" style={{ backgroundColor: "#1c2330", border: "1px solid #30363d" }}>
-          <input
-            className="w-full text-center font-bold pb-1.5 mb-2 bg-transparent outline-none"
-            style={{ color: "#e6edf3", borderBottom: "1px solid #30363d", fontSize: 16 }}
-            value={g.name}
-            onChange={e => updateGuard(i, "name", e.target.value)}
-            placeholder={guardPlaceholder(i, guards.length)}
-          />
+        <div
+          key={i}
+          className="rounded-xl p-3 mb-2 transition-all"
+          style={{
+            backgroundColor: g.isAbsent ? "#1a0a0a" : "#1c2330",
+            border: `1px solid ${g.isAbsent ? "#f85149" : "#30363d"}`,
+            opacity: g.isAbsent ? 0.75 : 1,
+          }}
+        >
+          {/* Name row + absent toggle */}
+          <div className="flex items-center gap-2 mb-2" style={{ direction: "rtl" }}>
+            <input
+              className="flex-1 text-center font-bold pb-1.5 bg-transparent outline-none"
+              style={{
+                color: g.isAbsent ? "#888" : "#e6edf3",
+                borderBottom: "1px solid #30363d",
+                fontSize: 16,
+              }}
+              value={g.name}
+              onChange={e => updateGuard(i, "name", e.target.value)}
+              placeholder={guardPlaceholder(i, guards.length)}
+            />
+            <button
+              className="flex-shrink-0 text-xs px-2 py-1 rounded-lg transition-all active:scale-95"
+              style={{
+                border: `1px solid ${g.isAbsent ? "#f85149" : "#30363d"}`,
+                backgroundColor: g.isAbsent ? "#f8514920" : "transparent",
+                color: g.isAbsent ? "#f85149" : "#555",
+                fontWeight: g.isAbsent ? 700 : 400,
+              }}
+              onClick={() => toggleAbsent(i)}
+            >
+              {g.isAbsent ? "✕ נעדר" : "נעדר"}
+            </button>
+          </div>
+
+          {/* Level + Double row */}
           <div className="flex flex-row-reverse items-center justify-between">
-            {/* כפולה checkbox — right side in RTL */}
             <button
               className="flex items-center gap-1.5 text-xs rounded px-1 py-0.5 transition-all"
               style={{ color: g.isDouble ? "#f0a500" : "#8b949e" }}
@@ -476,7 +572,6 @@ function GuardSetup({ guards, setGuards, onGenerate, generating }) {
                 {g.isDouble ? "✓" : ""}
               </span>
             </button>
-            {/* Level buttons — left side in RTL, only for non-gate guards */}
             {i < guards.length - 1 && (
               <div className="flex gap-1.5">
                 {["strong", "mid", "achmash"].map(lv => (
@@ -498,22 +593,103 @@ function GuardSetup({ guards, setGuards, onGenerate, generating }) {
           </div>
         </div>
       ))}
-      <button
-        className="w-full py-3 rounded-xl font-extrabold text-sm mt-2 transition-all active:scale-95"
-        style={{ backgroundColor: "#f0a500", color: "#000" }}
-        onClick={onGenerate}
-        disabled={generating}
-      >
-        {generating ? "⏳ מחשב..." : "⚡ צור סידור אוטומטי"}
-      </button>
     </div>
   );
 }
-function ValidationPanel({ errors }) {
+
+// ─── Shortage Panel ───────────────────────────────────────────────────────────
+function ShortagePanel({ absentGuard, absentIdx, totalGuards, gateDown, cicoDown, onCicoToggle }) {
+  const absentName = guardDisplayName(absentGuard, absentIdx, totalGuards);
+
+  const infoText = gateDown && cicoDown
+    ? "מלשינון פעיל בכל שעות המשמרת · Lenel ו-Bosh בלבד"
+    : gateDown
+      ? "שער ירד · מלשינון פעיל 07–10 · CICO, Lenel, Bosh פעילים כרגיל"
+      : cicoDown
+        ? "CICO ירד · שאר העמדות פעילות · מלשינון כרגיל"
+        : "כל העמדות פעילות · 4 שומרים פעילים";
+
+  return (
+    <div
+      className="rounded-xl p-4 mb-4"
+      style={{ direction: "rtl", backgroundColor: "#140c00", border: "1px solid #f0a500" }}
+    >
+      {/* Header */}
+      <div className="flex items-center gap-2 mb-1">
+        <span style={{ fontSize: 16 }}>⚠️</span>
+        <span className="font-bold text-sm" style={{ color: "#f0a500" }}>מצב חוסר</span>
+      </div>
+      <p className="text-xs mb-4" style={{ color: "#8b949e" }}>
+        {absentName} לא מגיע/ה למשמרת
+      </p>
+
+      {/* Toggles */}
+      <div className="text-xs mb-2 font-medium" style={{ color: "#8b949e" }}>הורד עמדות:</div>
+      <div className="flex gap-3 flex-wrap mb-3">
+
+        {/* Gate toggle — auto-on when gate guard absent, dimmed otherwise */}
+        <div
+          className="flex items-center gap-2 px-3 py-2 rounded-lg"
+          style={{
+            border: `1px solid ${gateDown ? "#f0a500" : "#30363d"}`,
+            backgroundColor: gateDown ? "#f0a50012" : "transparent",
+            opacity: absentGuard.isGate ? 1 : 0.4,
+          }}
+        >
+          <span
+            className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0"
+            style={{
+              backgroundColor: gateDown ? "#f0a500" : "transparent",
+              border: `1.5px solid ${gateDown ? "#f0a500" : "#555"}`,
+              color: "#000", fontSize: 10, fontWeight: "bold",
+            }}
+          >
+            {gateDown ? "✓" : ""}
+          </span>
+          <span className="text-xs font-medium" style={{ color: gateDown ? "#f0a500" : "#8b949e" }}>
+            שער{absentGuard.isGate ? " (אוטומטי)" : ""}
+          </span>
+        </div>
+
+        {/* CICO toggle */}
+        <button
+          className="flex items-center gap-2 px-3 py-2 rounded-lg transition-all active:scale-95"
+          style={{
+            border: `1px solid ${cicoDown ? "#f0a500" : "#30363d"}`,
+            backgroundColor: cicoDown ? "#f0a50012" : "transparent",
+          }}
+          onClick={onCicoToggle}
+        >
+          <span
+            className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0"
+            style={{
+              backgroundColor: cicoDown ? "#f0a500" : "transparent",
+              border: `1.5px solid ${cicoDown ? "#f0a500" : "#555"}`,
+              color: "#000", fontSize: 10, fontWeight: "bold",
+            }}
+          >
+            {cicoDown ? "✓" : ""}
+          </span>
+          <span className="text-xs font-medium" style={{ color: cicoDown ? "#f0a500" : "#8b949e" }}>CICO</span>
+        </button>
+      </div>
+
+      {/* Info */}
+      <div
+        className="text-xs px-3 py-2 rounded-lg"
+        style={{ backgroundColor: "#1a1000", color: "#8b949e", border: "1px solid #2a1800" }}
+      >
+        ℹ️ {infoText}
+      </div>
+    </div>
+  );
+}
+
+function ValidationPanel({ errors, isShortage }) {
   if (errors.length === 0) {
     return (
       <div className="rounded-xl p-3 mb-4 text-sm font-medium text-right" style={{ direction: "rtl", backgroundColor: "#0f1f10", border: "1px solid #1a4a1a", color: "#3fb950" }}>
-        ✅ הסידור תקין — כל הכללים מולאו!
+        ✅ {isShortage ? "סידור חוסר תקין" : "הסידור תקין"} — כל הכללים מולאו!
       </div>
     );
   }
@@ -526,6 +702,7 @@ function ValidationPanel({ errors }) {
     </div>
   );
 }
+
 function StatsRow({ sched, guards }) {
   return (
     <div className="flex overflow-x-auto gap-2 mb-4 pb-2" style={{ direction: "rtl" }}>
@@ -558,10 +735,13 @@ function StatsRow({ sched, guards }) {
     </div>
   );
 }
-function ScheduleTable({ sched, guards, onCellPress }) {
+
+function ScheduleTable({ sched, guards, onCellPress, isShortage }) {
   return (
     <div className="rounded-2xl p-3 mb-4 overflow-x-auto" style={{ backgroundColor: "#161b22", border: "1px solid #30363d" }}>
-      <h2 className="text-sm font-bold text-center mb-3" style={{ color: "#f0a500" }}>📋 טבלת השיבוץ</h2>
+      <h2 className="text-sm font-bold text-center mb-3" style={{ color: "#f0a500" }}>
+        📋 טבלת השיבוץ{isShortage ? " · ⚠️ חוסר" : ""}
+      </h2>
       <Legend />
       <div style={{ direction: "rtl", minWidth: guards.length * 65 + 70 }}>
         {/* Header */}
@@ -608,9 +788,13 @@ function ScheduleTable({ sched, guards, onCellPress }) {
     </div>
   );
 }
-function CellEditModal({ visible, hour, guardIdx, guards, onSelect, onClose }) {
+
+function CellEditModal({ visible, hour, guardIdx, guards, cfg, onSelect, onClose }) {
   if (!visible) return null;
-  const menuOpts = hour !== null ? [...new Set([...assignable(hour), "shaar"])] : [];
+  const base = hour !== null ? assignable(hour, cfg || {}) : [];
+  const menuOpts = hour !== null
+    ? [...new Set([...base, ...((cfg?.gateDown) ? [] : ["shaar"])])]
+    : [];
   return (
     <div
       className="fixed inset-0 flex items-center justify-center z-50"
@@ -643,9 +827,8 @@ function CellEditModal({ visible, hour, guardIdx, guards, onSelect, onClose }) {
     </div>
   );
 }
+
 // ─── Canvas Image Generator ───────────────────────────────────────────────────
-// Pure Canvas API — no html2canvas, no RTL/flex rendering bugs.
-// ctx.textAlign='center' + textBaseline='middle' always works correctly.
 function rrect(ctx, x, y, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
@@ -661,21 +844,18 @@ function rrect(ctx, x, y, w, h, r) {
 }
 
 function buildScheduleCanvas(sched, guards) {
-  const SCALE  = 2;           // retina quality
+  const SCALE  = 2;
   const W      = 840;
   const PAD    = 20;
-  const TW     = 76;          // time column width
-  const ROW_H  = 46;          // hour row height
-  const HDR_H  = 38;          // guard-name header height
-  const CP     = 3;           // cell padding
+  const TW     = 76;
+  const ROW_H  = 46;
+  const HDR_H  = 38;
+  const CP     = 3;
   const N      = guards.length;
   const guardW = (W - 2 * PAD - TW) / N;
 
-  // Layout: time column on RIGHT (matching app RTL feel).
-  // Canvas draws LTR, so guard columns fill left, time column is last on right.
-  // Guard gi=0 (מאבטח 1) is closest to time → rightmost guard position.
   const GRID_X  = PAD;
-  const TIME_X  = GRID_X + N * guardW;         // time column left edge
+  const TIME_X  = GRID_X + N * guardW;
   const GRID_W  = TW + N * guardW;
   const GRID_Y  = PAD + 90;
   const GRID_H  = HDR_H + 2 + ROW_H * 8;
@@ -687,11 +867,9 @@ function buildScheduleCanvas(sched, guards) {
   const ctx     = canvas.getContext("2d");
   ctx.scale(SCALE, SCALE);
 
-  // ── Background ──────────────────────────────────────────────────────────────
   ctx.fillStyle = "#0d1117";
   ctx.fillRect(0, 0, W, H);
 
-  // ── Title block ─────────────────────────────────────────────────────────────
   ctx.textAlign    = "center";
   ctx.textBaseline = "middle";
 
@@ -708,24 +886,19 @@ function buildScheduleCanvas(sched, guards) {
   ctx.font      = "11px Arial";
   ctx.fillText("משמרת בוקר 07:00–15:00", W / 2, PAD + 59);
 
-  // Orange accent bar
   ctx.fillStyle = "#f0a500";
   ctx.fillRect(W / 2 - 28, PAD + 72, 56, 2);
 
-  // ── Column header row ────────────────────────────────────────────────────────
   ctx.fillStyle = "#1c2330";
   ctx.fillRect(GRID_X, GRID_Y, GRID_W, HDR_H);
 
-  // Guard name headers (RTL order: guard[n-1] leftmost, guard[0] rightmost)
   guards.forEach((g, gi) => {
     const colX = GRID_X + (N - 1 - gi) * guardW;
     const cx   = colX + guardW / 2;
 
-    // Column divider
     ctx.fillStyle = "#30363d";
     ctx.fillRect(colX, GRID_Y, 1, HDR_H);
 
-    // Guard name — truncate if needed
     let name = guardDisplayName(g, gi, guards.length);
     ctx.font = "bold 12px Arial";
     while (ctx.measureText(name).width > guardW - 10 && name.length > 2)
@@ -738,7 +911,6 @@ function buildScheduleCanvas(sched, guards) {
     ctx.fillText(name, cx, GRID_Y + HDR_H / 2);
   });
 
-  // "שעה" header (rightmost column)
   ctx.fillStyle = "#30363d";
   ctx.fillRect(TIME_X, GRID_Y, 1, HDR_H);
   ctx.fillStyle    = "#8b949e";
@@ -747,17 +919,14 @@ function buildScheduleCanvas(sched, guards) {
   ctx.textBaseline = "middle";
   ctx.fillText("שעה", TIME_X + TW / 2, GRID_Y + HDR_H / 2);
 
-  // Header bottom border
   ctx.fillStyle = "#30363d";
   ctx.fillRect(GRID_X, GRID_Y + HDR_H, GRID_W, 2);
 
-  // ── Hour rows ────────────────────────────────────────────────────────────────
   HOURS.forEach((hr, h) => {
     const ry = GRID_Y + HDR_H + 2 + h * ROW_H;
 
     if (h > 0) { ctx.fillStyle = "#21262d"; ctx.fillRect(GRID_X, ry, GRID_W, 1); }
 
-    // Time column background + label
     ctx.fillStyle = "#1c2330";
     ctx.fillRect(TIME_X, ry, TW, ROW_H);
     ctx.fillStyle    = "#8b949e";
@@ -766,7 +935,6 @@ function buildScheduleCanvas(sched, guards) {
     ctx.textBaseline = "middle";
     ctx.fillText(hr.split("-")[0], TIME_X + TW / 2, ry + ROW_H / 2);
 
-    // Station cells
     guards.forEach((_, gi) => {
       const st   = sched[h][gi];
       const col  = st ? SC[st] : null;
@@ -790,11 +958,9 @@ function buildScheduleCanvas(sched, guards) {
     });
   });
 
-  // Outer grid border
   ctx.strokeStyle = "#30363d"; ctx.lineWidth = 1;
   ctx.strokeRect(GRID_X + .5, GRID_Y + .5, GRID_W - 1, GRID_H - 1);
 
-  // ── Watermark ────────────────────────────────────────────────────────────────
   ctx.fillStyle    = "#30363d";
   ctx.font         = "10px Arial";
   ctx.textAlign    = "center";
@@ -811,7 +977,6 @@ function FullscreenTable({ sched, guards, onClose }) {
       className="fixed inset-0 z-50 flex flex-col"
       style={{ backgroundColor: "#0d1117", height: "100dvh", width: "100dvw" }}
     >
-      {/* Compact header — safe area: top (Dynamic Island portrait) + sides (camera landscape) */}
       <div
         className="flex items-center justify-between flex-shrink-0"
         style={{
@@ -831,7 +996,6 @@ function FullscreenTable({ sched, guards, onClose }) {
         >✕</button>
       </div>
 
-      {/* Table — fills all remaining height, no scroll, respects side + bottom safe areas */}
       <div
         className="flex-1 flex flex-col overflow-hidden"
         style={{
@@ -841,7 +1005,6 @@ function FullscreenTable({ sched, guards, onClose }) {
           paddingBottom: "env(safe-area-inset-bottom)",
         }}
       >
-        {/* Column headers */}
         <div className="flex flex-shrink-0" style={{ borderBottom: "1px solid #30363d" }}>
           <div
             className="flex-shrink-0 flex items-center justify-center py-1"
@@ -862,7 +1025,6 @@ function FullscreenTable({ sched, guards, onClose }) {
           ))}
         </div>
 
-        {/* Hour rows — each takes equal share of remaining height */}
         {HOURS.map((hr, h) => (
           <div key={h} className="flex flex-1" style={{ borderBottom: "1px solid #21262d" }}>
             <div
@@ -897,6 +1059,7 @@ function FullscreenTable({ sched, guards, onClose }) {
     </div>
   );
 }
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [guards, setGuards] = useState(DEFAULT_GUARDS.map(g => ({ ...g })));
@@ -909,38 +1072,61 @@ export default function App() {
   const [showRules, setShowRules] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [origSched, setOrigSched] = useState(null);
+  const [cicoDown, setCicoDown] = useState(false);
+
+  // Derived: active guards (those not absent) and shortage config
+  const absentGuard = useMemo(() => guards.find(g => g.isAbsent) ?? null, [guards]);
+  const absentIdx   = useMemo(() => guards.findIndex(g => g.isAbsent), [guards]);
+  const isShortage  = !!absentGuard;
+  const displayGuards = useMemo(() => guards.filter(g => !g.isAbsent), [guards]);
+  const effectiveCfg  = useMemo(() => ({
+    gateDown:   absentGuard?.isGate ?? false,
+    cicoDown,
+    isShortage,
+  }), [absentGuard, cicoDown, isShortage]);
+
+  // Clear schedule when active guard count changes (absence toggled)
+  const activeCount = displayGuards.length;
+  useEffect(() => {
+    setSched(null);
+    setErrors([]);
+    setOrigSched(null);
+  }, [activeCount]);
+
   const handleGenerate = useCallback(() => {
     setGenerating(true);
     setTimeout(() => {
-      const s = generate(guards);
+      const s = generate(displayGuards, effectiveCfg);
       setSched(s);
       setOrigSched(s.map(r => [...r]));
-      setErrors(validateSched(s, guards));
+      setErrors(validateSched(s, displayGuards, effectiveCfg));
       setGenerating(false);
     }, 10);
-  }, [guards]);
+  }, [displayGuards, effectiveCfg]);
+
   const handleReset = useCallback(() => {
     if (!origSched) return;
     const s = origSched.map(r => [...r]);
     setSched(s);
-    setErrors(validateSched(s, guards));
-  }, [origSched, guards]);
+    setErrors(validateSched(s, displayGuards, effectiveCfg));
+  }, [origSched, displayGuards, effectiveCfg]);
+
   const handleCellPress = useCallback((h, g) => {
-    if (guards[g].isGate && h < 3) return;
+    if (displayGuards[g]?.isGate && h < 3 && !effectiveCfg.gateDown) return;
     setSelCell({ h, g });
     setMenuVisible(true);
-  }, [guards]);
+  }, [displayGuards, effectiveCfg]);
+
   const handleShare = useCallback(async () => {
     if (!sched) return;
     setSharing(true);
     try {
-      const canvas = buildScheduleCanvas(sched, guards);
+      const canvas = buildScheduleCanvas(sched, displayGuards);
       const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
       const file = new File([blob], "sidur-avtaha.png", { type: "image/png" });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file], title: "טבלת השיבוץ" });
       } else {
-        // Desktop fallback: download
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url; a.download = "sidur-avtaha.png"; a.click();
@@ -951,7 +1137,7 @@ export default function App() {
     } finally {
       setSharing(false);
     }
-  }, [sched, guards]);
+  }, [sched, displayGuards]);
 
   const handleSetCell = useCallback((st) => {
     if (!selCell || !sched) return;
@@ -959,9 +1145,10 @@ export default function App() {
     const ns = sched.map(r => [...r]);
     ns[h][g] = st;
     setSched(ns);
-    setErrors(validateSched(ns, guards));
+    setErrors(validateSched(ns, displayGuards, effectiveCfg));
     setMenuVisible(false);
-  }, [selCell, sched, guards]);
+  }, [selCell, sched, displayGuards, effectiveCfg]);
+
   return (
     <div className="min-h-screen" style={{ backgroundColor: "#0d1117", fontFamily: "'Segoe UI', Tahoma, sans-serif" }}>
       <div className="max-w-lg mx-auto px-3 py-4 pb-20">
@@ -971,6 +1158,7 @@ export default function App() {
           <h1 className="text-xl font-black" style={{ color: "#e6edf3" }}>🛡️ מנהל משמרות אבטחה</h1>
           <p className="text-xs mt-1" style={{ color: "#8b949e" }}>שיבוץ אוטומטי חכם · משמרת בוקר 07:00–15:00</p>
         </div>
+
         {/* Collapsible Rules */}
         <div className="rounded-xl mb-4" style={{ backgroundColor: "#1c2330", border: "1px solid #30363d" }}>
           <button
@@ -995,6 +1183,7 @@ export default function App() {
                 "אין מלשינון רצוף",
                 "אין כפילויות",
                 "איזון הפסקות (פער מקס׳ 1)",
+                "חוסר: מלשינון עובר ל-07–10 כששער יורד",
               ].map((rule, i) => (
                 <div key={i} className="flex items-center gap-1.5 py-0.5">
                   <span className="text-xs">✅</span>
@@ -1004,15 +1193,48 @@ export default function App() {
             </div>
           )}
         </div>
+
         {/* Guard Setup */}
-        <GuardSetup guards={guards} setGuards={setGuards} onGenerate={handleGenerate} generating={generating} />
+        <GuardSetup guards={guards} setGuards={setGuards} />
+
+        {/* Shortage Panel (shown when exactly 1 guard is absent) */}
+        {isShortage && (
+          <ShortagePanel
+            absentGuard={absentGuard}
+            absentIdx={absentIdx}
+            totalGuards={guards.length}
+            gateDown={effectiveCfg.gateDown}
+            cicoDown={cicoDown}
+            onCicoToggle={() => setCicoDown(v => !v)}
+          />
+        )}
+
+        {/* Generate Button */}
+        <button
+          className="w-full py-3 rounded-xl font-extrabold text-sm mb-4 transition-all active:scale-95"
+          style={{ backgroundColor: "#f0a500", color: "#000" }}
+          onClick={handleGenerate}
+          disabled={generating}
+        >
+          {generating
+            ? "⏳ מחשב..."
+            : isShortage
+              ? "⚡ צור סידור חוסר"
+              : "⚡ צור סידור אוטומטי"}
+        </button>
+
         {/* Stats */}
-        {sched && <StatsRow sched={sched} guards={guards} />}
+        {sched && <StatsRow sched={sched} guards={displayGuards} />}
+
         {/* Schedule Table */}
         {sched && (
           <>
-            <ScheduleTable sched={sched} guards={guards} onCellPress={handleCellPress} />
-            {/* Fullscreen button */}
+            <ScheduleTable
+              sched={sched}
+              guards={displayGuards}
+              onCellPress={handleCellPress}
+              isShortage={isShortage}
+            />
             <div className="flex justify-center mb-4">
               <button
                 className="px-5 py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
@@ -1024,6 +1246,7 @@ export default function App() {
             </div>
           </>
         )}
+
         {/* Action buttons */}
         {sched && (
           <div className="flex gap-2 mb-3" style={{ direction: "rtl" }}>
@@ -1038,15 +1261,17 @@ export default function App() {
             <button
               className="flex-1 py-2.5 rounded-xl text-xs font-semibold transition-all active:scale-95"
               style={{ backgroundColor: "#1c2330", border: "1px solid #30363d", color: "#e6edf3" }}
-              onClick={() => setErrors(validateSched(sched, guards))}
+              onClick={() => setErrors(validateSched(sched, displayGuards, effectiveCfg))}
             >
               ✔️ בדוק כללים
             </button>
           </div>
         )}
-        {/* Validation — below action buttons */}
-        {sched && <ValidationPanel errors={errors} />}
-        {/* Share button */}
+
+        {/* Validation */}
+        {sched && <ValidationPanel errors={errors} isShortage={isShortage} />}
+
+        {/* Share */}
         {sched && (
           <button
             className="w-full py-3 rounded-xl text-sm font-extrabold mb-4 transition-all active:scale-95"
@@ -1063,18 +1288,21 @@ export default function App() {
           </button>
         )}
       </div>
+
       {/* Cell Edit Modal */}
       <CellEditModal
         visible={menuVisible}
         hour={selCell?.h}
         guardIdx={selCell?.g}
-        guards={guards}
+        guards={displayGuards}
+        cfg={effectiveCfg}
         onSelect={handleSetCell}
         onClose={() => setMenuVisible(false)}
       />
+
       {/* Fullscreen */}
       {sched && fullscreen && (
-        <FullscreenTable sched={sched} guards={guards} onClose={() => setFullscreen(false)} />
+        <FullscreenTable sched={sched} guards={displayGuards} onClose={() => setFullscreen(false)} />
       )}
     </div>
   );
