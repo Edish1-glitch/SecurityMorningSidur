@@ -32,13 +32,11 @@ function mulberry32(seed) {
 function assignable(h, cfg = {}) {
   const s = ["lenel", "bosh", "break"];
   if (h > 0 && !cfg.cicoDown) s.push("cico");
-  // Malshinon hours shift when gate is down
+  // Malshinon: all hours when gate+CICO both down; otherwise normal schedule (07, 10–14)
   if (cfg.gateDown && cfg.cicoDown) {
-    s.push("malshinon"); // all hours: gate+CICO both down
-  } else if (cfg.gateDown) {
-    if (h <= 2) s.push("malshinon"); // gate down only: 07–10
+    s.push("malshinon"); // gate+CICO both down → malshinon covers all hours
   } else {
-    if (h === 0 || h >= 3) s.push("malshinon"); // normal
+    if (h === 0 || h >= 3) s.push("malshinon"); // normal (regardless of gateDown alone)
   }
   if (!cfg.gateDown && h <= 2) s.push("shaar");
   return s;
@@ -259,12 +257,10 @@ function tryGen(seed, guards, cfg = {}) {
     if (cands.length) sched[h][cands[0]] = "bosh";
   }
 
-  // Malshinon — hours depend on cfg
-  const malsHours = cfg.gateDown && cfg.cicoDown
+  // Malshinon — all hours when gate+CICO both down; otherwise normal (07, 10–14)
+  const malsHours = (cfg.gateDown && cfg.cicoDown)
     ? [0, 1, 2, 3, 4, 5, 6, 7]
-    : cfg.gateDown
-      ? [0, 1, 2]
-      : [0, 3, 4, 5, 6, 7];
+    : [0, 3, 4, 5, 6, 7];
 
   const maxRest = cfg.maxRest || 3;
   for (const h of shuffle(malsHours)) {
@@ -612,7 +608,7 @@ function ShortagePanel({ absentGuard, absentIdx, totalGuards, gateDown, cicoDown
   const infoText = gateDown && cicoDown
     ? "מלשינון פעיל בכל שעות המשמרת · Lenel ו-Bosh בלבד"
     : gateDown
-      ? "שער ירד · מלשינון פעיל 07–10 · CICO, Lenel, Bosh פעילים כרגיל"
+      ? "שוער ירד · מלשינון כרגיל (07, 10–14) · CICO, Lenel, Bosh פעילים"
       : cicoDown
         ? "CICO ירד · שאר העמדות פעילות · מלשינון כרגיל"
         : "כל העמדות פעילות · 4 שומרים פעילים";

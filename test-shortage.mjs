@@ -22,8 +22,6 @@ function assignable(h, cfg = {}) {
   if (h > 0 && !cfg.cicoDown) s.push("cico");
   if (cfg.gateDown && cfg.cicoDown) {
     s.push("malshinon");
-  } else if (cfg.gateDown) {
-    if (h <= 2) s.push("malshinon");
   } else {
     if (h === 0 || h >= 3) s.push("malshinon");
   }
@@ -210,7 +208,7 @@ function tryGen(seed, guards, cfg = {}) {
     const cands = shuffle(Array.from({ length: N }, (_, i) => i)).filter(g => free(h, g) && !needsBreak(h, g) && activeConsec(h, g) < 3);
     if (cands.length) sched[h][cands[0]] = "bosh";
   }
-  const malsHours = cfg.gateDown && cfg.cicoDown ? [0,1,2,3,4,5,6,7] : cfg.gateDown ? [0,1,2] : [0,3,4,5,6,7];
+  const malsHours = (cfg.gateDown && cfg.cicoDown) ? [0,1,2,3,4,5,6,7] : [0,3,4,5,6,7];
   const maxRest = cfg.maxRest || 3;
   for (const h of shuffle(malsHours)) {
     if (sched[h].includes("malshinon")) continue;
