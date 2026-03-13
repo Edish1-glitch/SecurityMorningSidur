@@ -1,4 +1,102 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+
+// ─── PIN Protection ────────────────────────────────────────────────────────────
+// Change this to your desired PIN:
+const APP_PIN = "1234";
+const SESSION_KEY = "mgr_auth_v1";
+
+export { SESSION_KEY };
+export function PinScreen({ onAuth }) {
+  const [digits, setDigits] = useState(["", "", "", ""]);
+  const [shake, setShake]   = useState(false);
+  const [error, setError]   = useState(false);
+  const refs = [useRef(), useRef(), useRef(), useRef()];
+
+  const handleKey = (i, val) => {
+    if (!/^\d*$/.test(val)) return;
+    const next = [...digits];
+    next[i] = val.slice(-1);
+    setDigits(next);
+    setError(false);
+    if (val && i < 3) refs[i + 1].current?.focus();
+    if (val && i === 3) {
+      const pin = [...next].join("");
+      if (pin === APP_PIN) {
+        sessionStorage.setItem(SESSION_KEY, "1");
+        onAuth();
+      } else {
+        setShake(true);
+        setError(true);
+        setDigits(["", "", "", ""]);
+        setTimeout(() => { setShake(false); refs[0].current?.focus(); }, 500);
+      }
+    }
+  };
+
+  const handleKeyDown = (i, e) => {
+    if (e.key === "Backspace" && !digits[i] && i > 0) refs[i - 1].current?.focus();
+  };
+
+  useEffect(() => { refs[0].current?.focus(); }, []);
+
+  return (
+    <div style={{
+      minHeight: "100dvh", display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "center",
+      backgroundColor: "#0d1117", padding: 24,
+    }}>
+      <div style={{ marginBottom: 28, textAlign: "center" }}>
+        <div style={{ fontSize: 52, marginBottom: 12 }}>🛡️</div>
+        <div style={{ fontSize: 22, fontWeight: 900, color: "#e6edf3", marginBottom: 4 }}>
+          מנהל משמרות אבטחה
+        </div>
+        <div style={{ fontSize: 13, color: "#8b949e" }}>הכנס קוד גישה להמשך</div>
+      </div>
+
+      <div style={{
+        display: "flex", gap: 14, direction: "ltr", marginBottom: 16,
+        animation: shake ? "shake 0.45s ease" : "none",
+      }}>
+        {digits.map((d, i) => (
+          <input
+            key={i}
+            ref={refs[i]}
+            type="password"
+            inputMode="numeric"
+            maxLength={1}
+            value={d}
+            onChange={e => handleKey(i, e.target.value)}
+            onKeyDown={e => handleKeyDown(i, e)}
+            style={{
+              width: 58, height: 68, textAlign: "center", fontSize: 28,
+              fontWeight: 700, borderRadius: 12,
+              backgroundColor: error ? "#1a0a0a" : "#161b22",
+              border: `2px solid ${error ? "#f85149" : d ? "#f0a500" : "#30363d"}`,
+              color: "#e6edf3", outline: "none",
+              transition: "border-color 0.15s",
+            }}
+          />
+        ))}
+      </div>
+
+      {error && (
+        <div style={{ fontSize: 13, color: "#f85149", marginTop: 4 }}>
+          קוד שגוי — נסה שוב
+        </div>
+      )}
+
+      <style>{`
+        @keyframes shake {
+          0%,100% { transform: translateX(0); }
+          20%      { transform: translateX(-8px); }
+          40%      { transform: translateX(8px); }
+          60%      { transform: translateX(-6px); }
+          80%      { transform: translateX(6px); }
+        }
+      `}</style>
+    </div>
+  );
+}
 // ─── Constants ────────────────────────────────────────────────────────────────
 const HOURS = [
   "07:00-08:00","08:00-09:00","09:00-10:00","10:00-11:00",
