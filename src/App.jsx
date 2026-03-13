@@ -559,10 +559,22 @@ function guardPlaceholder(i, total) {
 function guardDisplayName(g, i, total) {
   return g.name || guardPlaceholder(i, total);
 }
-// First name only (for schedule table); full name (for attendance report)
-function guardFirstName(g, i, total) {
-  if (!g.name) return guardPlaceholder(i, total);
-  return g.name.split(" ")[0];
+// First name only for schedule table.
+// If two guards share the same first name → append first letter of last name: "עידן י."
+function guardFirstName(g, i, allGuards) {
+  if (!g.name) return guardPlaceholder(i, allGuards.length);
+  const parts     = g.name.trim().split(/\s+/);
+  const firstName = parts[0];
+  // Check if another guard has the same first name
+  const hasDup = allGuards.some((g2, j) => {
+    if (j === i || !g2.name) return false;
+    return g2.name.trim().split(/\s+/)[0] === firstName;
+  });
+  if (!hasDup) return firstName;
+  // Disambiguate with first letter of last name (if available)
+  return parts.length >= 2 && parts[1]
+    ? `${firstName} ${parts[1][0]}.`
+    : firstName;
 }
 const DEFAULT_GUARDS = [
   { name: "", level: "strong", isDouble: false, isGate: false, isAbsent: false },
@@ -819,7 +831,7 @@ function StatsRow({ sched, guards }) {
         const lc = levelColor(g.level);
         return (
           <div key={gi} className="rounded-xl p-3 flex-shrink-0" style={{ backgroundColor: "#161b22", border: "1px solid #30363d", minWidth: 130 }}>
-            <div className="text-xs font-bold text-center mb-0.5" style={{ color: lc }}>{guardFirstName(g, gi, guards.length)}</div>
+            <div className="text-xs font-bold text-center mb-0.5" style={{ color: lc }}>{guardFirstName(g, gi, guards)}</div>
             {(g.isDouble || g.isGate) && (
               <div className="text-xs text-center mb-2" style={{ color: lc }}>
                 {[g.isGate && "שער", g.isDouble && "כפולה"].filter(Boolean).join(" · ")}
@@ -859,7 +871,7 @@ function ScheduleTable({ sched, guards, onCellPress, isShortage }) {
           </div>
           {guards.map((g, gi) => (
             <div key={gi} className="flex-1 flex items-center justify-center py-2 min-w-0" style={{ backgroundColor: "#1c2330", borderRight: "1px solid #30363d" }}>
-              <span className="text-xs font-bold truncate px-1" style={{ color: "#e6edf3" }}>{guardFirstName(g, gi, guards.length)}</span>
+              <span className="text-xs font-bold truncate px-1" style={{ color: "#e6edf3" }}>{guardFirstName(g, gi, guards)}</span>
             </div>
           ))}
         </div>
@@ -1007,11 +1019,11 @@ function buildScheduleCanvas(sched, guards) {
     ctx.fillStyle = "#30363d";
     ctx.fillRect(colX, GRID_Y, 1, HDR_H);
 
-    let name = guardFirstName(g, gi, guards.length);
+    let name = guardFirstName(g, gi, guards);
     ctx.font = "bold 12px Arial";
     while (ctx.measureText(name).width > guardW - 10 && name.length > 2)
       name = name.slice(0, -1);
-    if (name !== guardFirstName(g, gi, guards.length)) name += "…";
+    if (name !== guardFirstName(g, gi, guards)) name += "…";
 
     ctx.fillStyle    = "#e6edf3";
     ctx.textAlign    = "center";
@@ -1127,7 +1139,7 @@ function FullscreenTable({ sched, guards, onClose }) {
               style={{ backgroundColor: "#1c2330", borderRight: "1px solid #30363d" }}
             >
               <span className="font-bold truncate px-1" style={{ color: "#e6edf3", fontSize: 11 }}>
-                {guardFirstName(g, gi, guards.length)}
+                {guardFirstName(g, gi, guards)}
               </span>
             </div>
           ))}
@@ -1173,42 +1185,47 @@ const TAKKEN_FULL    = "מלא";
 const TAKKEN_SHORTAGE = "חוסר מאבטח לא חמוש בין 07:00–15:00";
 
 function AttendanceReport({ guards, isShortage }) {
-  const SHIFTS      = ["בוקר", "צהריים", "לילה"];
-  const ROLE_OPTIONS = ['אחמ"ש', "מאבטח", "מאבטחת", "חמוש"];
-  const DAYS_HE     = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
+  const SHIFTS       = ["בוקר", "צהריים", "לילה"];
+  const ROLE_OPTIONS = ["מאבטח", "מאבטחת", "חמוש"]; // אחמ"ש is auto-locked
+  const DAYS_HE      = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
 
-  const defaultRoles  = (gs) => gs.map(g => (g.level === "achmash" ? 'אחמ"ש' : "מאבטח"));
-  const defaultStatus = (shortage) => shortage ? TAKKEN_SHORTAGE : TAKKEN_FULL;
+  // Achmash always first, then others in original order; keep original index for display name
+  const sortedWithIdx = useMemo(() => [
+    ...guards.map((g, i) => ({ g, i })).filter(x => x.g.level === "achmash"),
+    ...guards.map((g, i) => ({ g, i })).filter(x => x.g.level !== "achmash"),
+  ], [guards]);
+
+  const mkRoles = (swi) => swi.map(({ g }) => g.level === "achmash" ? 'אחמ"ש' : "מאבטח");
 
   const [open, setOpen]             = useState(false);
   const [shift, setShift]           = useState("בוקר");
-  const [roles, setRoles]           = useState(() => defaultRoles(guards));
-  const [status, setStatus]         = useState(() => defaultStatus(isShortage));
+  const [roles, setRoles]           = useState(() => mkRoles(sortedWithIdx));
+  const [status, setStatus]         = useState(() => isShortage ? TAKKEN_SHORTAGE : TAKKEN_FULL);
   const [reportText, setReportText] = useState("");
   const [copied, setCopied]         = useState(false);
 
   // Reset when guard list or shortage mode changes
   useEffect(() => {
-    setRoles(defaultRoles(guards));
-    setStatus(defaultStatus(isShortage));
+    const swi = [
+      ...guards.map((g, i) => ({ g, i })).filter(x => x.g.level === "achmash"),
+      ...guards.map((g, i) => ({ g, i })).filter(x => x.g.level !== "achmash"),
+    ];
+    setRoles(mkRoles(swi));
+    setStatus(isShortage ? TAKKEN_SHORTAGE : TAKKEN_FULL);
     setReportText("");
   }, [guards, isShortage]);
 
-  const updateRole = (i, val) =>
-    setRoles(prev => prev.map((r, idx) => (idx === i ? val : r)));
+  const updateRole = (pos, val) =>
+    setRoles(prev => prev.map((r, idx) => (idx === pos ? val : r)));
 
   const generateReport = () => {
     const now     = new Date();
     const dayName = DAYS_HE[now.getDay()];
-    const day     = now.getDate();
-    const month   = now.getMonth() + 1;
-    const year    = now.getFullYear();
-    const dateStr = `${day}/${month}/${year}`;
-
+    const dateStr = `${now.getDate()}/${now.getMonth() + 1}/${now.getFullYear()}`;
     const totalCount = guards.length + 2; // +2 חמושים
 
-    const guardLines = guards.map((g, i) =>
-      `*${i + 1}.* ${guardDisplayName(g, i, guards.length)} - (${roles[i] || "מאבטח"})`
+    const guardLines = sortedWithIdx.map(({ g, i: origIdx }, pos) =>
+      `*${pos + 1}.* ${guardDisplayName(g, origIdx, guards.length)} - (${roles[pos] || "מאבטח"})`
     );
 
     const text = [
@@ -1279,29 +1296,45 @@ function AttendanceReport({ guards, isShortage }) {
             </div>
           </div>
 
-          {/* Guard roles */}
+          {/* Guard roles — achmash always first with locked badge */}
           <div className="mb-3">
             <div className="text-xs font-medium mb-1.5" style={{ color: "#8b949e" }}>תפקידים:</div>
-            {guards.map((g, i) => (
-              <div key={i} className="flex items-center gap-2 mb-1.5">
+            {sortedWithIdx.map(({ g, i: origIdx }, pos) => (
+              <div key={origIdx} className="flex items-center gap-2 mb-1.5">
                 <span className="text-xs font-bold flex-1 truncate" style={{ color: "#e6edf3" }}>
-                  {guardDisplayName(g, i, guards.length)}
+                  {guardDisplayName(g, origIdx, guards.length)}
                 </span>
-                <select
-                  value={roles[i] || "מאבטח"}
-                  onChange={e => updateRole(i, e.target.value)}
-                  className="rounded-lg px-2 py-1.5"
-                  style={{
-                    backgroundColor: "#1c2330",
-                    border: "1px solid #30363d",
-                    color: "#e6edf3",
-                    minWidth: 100,
-                    outline: "none",
-                    fontSize: 16,
-                  }}
-                >
-                  {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
-                </select>
+                {g.level === "achmash" ? (
+                  /* Locked badge for achmash — no dropdown */
+                  <span
+                    className="rounded-lg px-2 py-1.5 text-xs font-medium text-center"
+                    style={{
+                      backgroundColor: "#1a253540",
+                      border: "1px solid #58a6ff",
+                      color: "#58a6ff",
+                      minWidth: 100,
+                      display: "inline-block",
+                    }}
+                  >
+                    אחמ"ש
+                  </span>
+                ) : (
+                  <select
+                    value={roles[pos] || "מאבטח"}
+                    onChange={e => updateRole(pos, e.target.value)}
+                    className="rounded-lg px-2 py-1.5"
+                    style={{
+                      backgroundColor: "#1c2330",
+                      border: "1px solid #30363d",
+                      color: "#e6edf3",
+                      minWidth: 100,
+                      outline: "none",
+                      fontSize: 16,
+                    }}
+                  >
+                    {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                )}
               </div>
             ))}
           </div>
