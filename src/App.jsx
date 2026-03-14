@@ -235,8 +235,11 @@ function validateSched(sched, guards, cfg = {}) {
     const cc = row.filter(s => s === "cico").length;
     const lim = cicoLimit(g, guards);
     if (cc > lim) errs.push(`${gName}: ${cc} CICO (מקס׳ ${lim})`);
-    if (guard.isDouble && guard.level !== "achmash" && row[7] !== "cico")
-      errs.push(`${gName}: כפולה חייב CICO בשעה האחרונה`);
+    if (guard.isDouble && guard.level !== "achmash" && row[7] !== "cico") {
+      // Only flag if no other double guard already occupies CICO at hour 7
+      const anotherDoubleHasCico = guards.some((g2, gi2) => gi2 !== g && g2.isDouble && sched[7][gi2] === "cico");
+      if (!anotherDoubleHasCico) errs.push(`${gName}: כפולה חייב CICO בשעה האחרונה`);
+    }
     for (let h = 0; h < 7; h++) {
       if (row[h] === "malshinon" && row[h + 1] === "malshinon")
         errs.push(`${gName}: מלשינון רצוף@${HOURS[h]}`);
@@ -311,7 +314,7 @@ function tryGen(seed, guards, cfg = {}) {
   // Gate guard gets shaar only if station is active
   guards.forEach((g, gi) => {
     if (g.isGate && !cfg.gateDown) for (let h = 0; h < 3; h++) sched[h][gi] = "shaar";
-    if (g.isDouble) sched[7][gi] = "cico";
+    if (g.isDouble && !sched[7].includes("cico")) sched[7][gi] = "cico";
   });
 
   // CICO assignment (skip entirely if cicoDown)
