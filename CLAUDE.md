@@ -105,15 +105,15 @@ PIN (`APP_PIN = "1234"`) + `sessionStorage` key `"mgr_auth_v1"`. Auth resets on 
 
 ### Jest (primary — `npm test`)
 
-`src/__tests__/scheduling.test.js` — **66 tests**, organised into four suites:
+`src/__tests__/scheduling.test.js` — **73 tests**, organised into five suites:
 
 | Suite | Tests | What is verified |
 |-------|-------|-----------------|
-| `cicoLimit` | 9 | CICO cap per guard level, deficit math, achmash |
+| `cicoLimit` | 10 | CICO cap per guard level, deficit math, achmash |
 | `validateSched` | 7 | Error detection: duplicates, CICO-no-break, >3 consec, double rules |
 | `generate — normal` | 17 | All standard 5-guard compositions (mirrors `test-scenarios.mjs`) |
 | `generate — doubles` | 23 | 1–5 כפולה in all compositions + no-duplicate assertions (mirrors `test-doubles.mjs`) |
-| `generate — shortage` | 14 | All חוסר cfg combinations + station-presence assertions (mirrors `test-shortage.mjs`) |
+| `generate — shortage` | 16 | All חוסר cfg combinations + station-presence assertions (mirrors `test-shortage.mjs`) |
 
 Setup files (required once after fresh clone):
 - `babel.config.cjs` — transforms ESM + JSX → CJS for Jest
