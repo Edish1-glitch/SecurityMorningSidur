@@ -8,17 +8,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm run dev        # Start Vite dev server (usually ports 5173–5175)
 npm run build      # Production build
 npm run preview    # Preview production build
+npm test           # Run Jest test suite (66 tests — see Testing section)
+npm run test:coverage  # Same + coverage report
 
-# Run scheduling logic tests (Node.js, no test framework needed)
+# Standalone Node scripts (copy of the algorithm — useful for quick iteration without a browser)
 node test-scenarios.mjs   # Normal mode: 5-guard compositions
 node test-shortage.mjs    # Shortage mode: 4-guard + cfg variations
+node test-doubles.mjs     # Double guard (כפולה): 21 scenarios
 ```
 
-There is no linter configured. There are no automated tests via `npm test` — the two `.mjs` test files are standalone Node scripts that copy the scheduling logic from `App.jsx` and run it directly.
+There is no linter configured.
+
+## ⚡ Automatic Testing — REQUIRED
+
+**After every change to the scheduling algorithm** (`generate`, `tryGen`, `postFix`,
+`validateSched`, `cicoLimit`, or any helper they call in `src/App.jsx`):
+
+1. **Ensure deps are installed** — run `npm install` if `node_modules/jest` is absent
+   (needed after a fresh clone, or whenever `package.json` devDependencies change).
+2. **Run the full test suite** — `npm test`
+3. **Do not commit** until `npm test` exits with 0 failures.
+
+> Node binary path (if `node`/`npm` are not on PATH):
+> `export PATH="/Users/edishteinberg/.local/share/cursor-agent/versions/2025.10.02-bd871ac:$PATH"`
 
 ## Architecture
 
-**Everything lives in `src/App.jsx`** — one large file (~1750 lines). There are no separate modules. The file is structured top-to-bottom:
+**Everything lives in `src/App.jsx`** — one large file (~1755 lines). There are no separate modules. The file is structured top-to-bottom:
 
 1. PIN screen + session auth (`APP_PIN`, `SESSION_KEY` → `sessionStorage`)
 2. Constants: `HOURS`, station labels `SL`, station colors `SC`, `REST` set
@@ -85,9 +101,34 @@ PIN (`APP_PIN = "1234"`) + `sessionStorage` key `"mgr_auth_v1"`. Auth resets on 
 
 `buildScheduleCanvas(sched, guards)` draws the schedule to an off-screen `<canvas>` at 2× scale for retina. Shared via Web Share API on mobile or downloaded as PNG on desktop.
 
-### Test Files Warning
+## Testing
 
-`test-scenarios.mjs` and `test-shortage.mjs` contain **copied** versions of the scheduling logic. When the algorithm in `App.jsx` changes, these copies can become stale and may not reflect actual app behavior. They are useful for rapid iteration on the algorithm without a browser.
+### Jest (primary — `npm test`)
+
+`src/__tests__/scheduling.test.js` — **66 tests**, organised into four suites:
+
+| Suite | Tests | What is verified |
+|-------|-------|-----------------|
+| `cicoLimit` | 9 | CICO cap per guard level, deficit math, achmash |
+| `validateSched` | 7 | Error detection: duplicates, CICO-no-break, >3 consec, double rules |
+| `generate — normal` | 17 | All standard 5-guard compositions (mirrors `test-scenarios.mjs`) |
+| `generate — doubles` | 23 | 1–5 כפולה in all compositions + no-duplicate assertions (mirrors `test-doubles.mjs`) |
+| `generate — shortage` | 14 | All חוסר cfg combinations + station-presence assertions (mirrors `test-shortage.mjs`) |
+
+Setup files (required once after fresh clone):
+- `babel.config.cjs` — transforms ESM + JSX → CJS for Jest
+- `jest.config.cjs` — `testEnvironment: node`, `transform: babel-jest`
+
+The scheduling functions are exported from `App.jsx` **for testing only** at the bottom of the file:
+```js
+export { generate, validateSched, tryGen, postFix, cicoLimit, mulberry32, assignable };
+```
+
+### Standalone Node scripts (secondary)
+
+`test-scenarios.mjs`, `test-shortage.mjs`, `test-doubles.mjs` contain **copied** versions of the scheduling logic and run directly with `node`. They are useful for rapid algorithm iteration without a browser or Jest install.
+
+> ⚠️ When the algorithm in `App.jsx` changes, these copies may become stale. Always keep them in sync and verify with `npm test` as the authoritative check.
 
 ## Key Domain Constants
 
