@@ -333,8 +333,21 @@ function tryGen(seed, guards, cfg = {}) {
       let assigned = 0;
       for (const h of validHours) {
         if (assigned >= need) break;
+        if (!free(h, g)) continue; // re-check: slot may have been filled by break-after-cico from an earlier iteration
         if (h < 7 && !free(h + 1, g) && sched[h + 1][g] !== "break") continue;
         if (h < 7 && free(h + 1, g) && sched[h + 1].includes("break")) continue;
+        // Guard against placing CICO when too few guards remain for mandatory stations at h
+        const mandNeed = (sched[h].includes("lenel") ? 0 : 1) + (sched[h].includes("bosh") ? 0 : 1);
+        if (mandNeed > 0) {
+          const activeCands = Array.from({ length: N }, (_, gi) => gi).filter(gi => {
+            if (gi === g) return false;
+            if (sched[h][gi]) return false;
+            if (guards[gi].isGate && !cfg.gateDown && h < 3) return false;
+            if (h > 0 && sched[h - 1][gi] === "cico") return false;
+            return true;
+          }).length;
+          if (activeCands < mandNeed) continue;
+        }
         sched[h][g] = "cico";
         if (h < 7 && free(h + 1, g)) sched[h + 1][g] = "break";
         assigned++;
@@ -342,20 +355,26 @@ function tryGen(seed, guards, cfg = {}) {
     }
   }
 
-  // Lenel
+  // Lenel — fallback relaxes consecutive constraint if no ideal candidate
   for (const h of shuffle([0, 1, 2, 3, 4, 5, 6, 7])) {
     if (sched[h].includes("lenel")) continue;
-    const cands = shuffle(Array.from({ length: N }, (_, i) => i)).filter(g =>
+    let cands = shuffle(Array.from({ length: N }, (_, i) => i)).filter(g =>
       free(h, g) && !needsBreak(h, g) && activeConsec(h, g) < 3
+    );
+    if (!cands.length) cands = shuffle(Array.from({ length: N }, (_, i) => i)).filter(g =>
+      free(h, g) && !needsBreak(h, g)
     );
     if (cands.length) sched[h][cands[0]] = "lenel";
   }
 
-  // Bosh
+  // Bosh — fallback relaxes consecutive constraint if no ideal candidate
   for (const h of shuffle([0, 1, 2, 3, 4, 5, 6, 7])) {
     if (sched[h].includes("bosh")) continue;
-    const cands = shuffle(Array.from({ length: N }, (_, i) => i)).filter(g =>
+    let cands = shuffle(Array.from({ length: N }, (_, i) => i)).filter(g =>
       free(h, g) && !needsBreak(h, g) && activeConsec(h, g) < 3
+    );
+    if (!cands.length) cands = shuffle(Array.from({ length: N }, (_, i) => i)).filter(g =>
+      free(h, g) && !needsBreak(h, g)
     );
     if (cands.length) sched[h][cands[0]] = "bosh";
   }
