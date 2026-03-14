@@ -1750,3 +1750,6 @@ export default function App() {
     </div>
   );
 }
+
+// ─── Named exports for unit testing (scheduling logic only) ───────────────────
+export { generate, validateSched, tryGen, postFix, cicoLimit, mulberry32, assignable };
