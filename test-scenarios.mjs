@@ -5,9 +5,9 @@ const HOURS = [
 ];
 const SL = {
   cico: "CICO", lenel: "Lenel", bosh: "Bosh",
-  break: "הפסקה", malshinon: "מלשינון", shaar: "שער",
+  break: "הפסקה", siyurim: "סיורים", shaar: "שער",
 };
-const REST = new Set(["break", "malshinon", "shaar"]);
+const REST = new Set(["break", "siyurim", "shaar"]);
 
 function mulberry32(seed) {
   return function () {
@@ -20,7 +20,7 @@ function mulberry32(seed) {
 function assignable(h) {
   const s = ["lenel", "bosh", "break"];
   if (h > 0) s.push("cico");
-  if (h === 0 || h >= 3) s.push("malshinon");
+  if (h === 0 || h >= 3) s.push("siyurim");
   if (h <= 2) s.push("shaar");
   return s;
 }
@@ -75,8 +75,8 @@ function canPlaceFix(h, g, st, sched, guards) {
     const cnt = sched.map(r => r[g]).filter(s => s === "cico").length;
     if (cnt >= cicoLimit(g, guards)) return false;
   }
-  if (st === "malshinon" && h > 0 && sched[h - 1][g] === "malshinon") return false;
-  if (st === "malshinon" && h < 7 && sched[h + 1][g] === "malshinon") return false;
+  if (st === "siyurim" && h > 0 && sched[h - 1][g] === "siyurim") return false;
+  if (st === "siyurim" && h < 7 && sched[h + 1][g] === "siyurim") return false;
   if (st === "break" && h > 0 && sched[h - 1][g] === "break") return false;
   if (sched[h].some((s, gi) => gi !== g && s === st)) return false;
   return true;
@@ -117,11 +117,11 @@ function validateSched(sched, guards) {
     if (guard.isDouble && guard.level !== "achmash" && row[7] !== "cico")
       errs.push(`${gName}: כפולה חייב CICO בשעה האחרונה`);
     for (let h = 0; h < 7; h++) {
-      if (row[h] === "malshinon" && row[h + 1] === "malshinon")
-        errs.push(`${gName}: מלשינון רצוף@${HOURS[h]}`);
+      if (row[h] === "siyurim" && row[h + 1] === "siyurim")
+        errs.push(`${gName}: סיורים רצוף@${HOURS[h]}`);
     }
     if (guard.level === "achmash") {
-      const required = ["lenel", "bosh", "malshinon", "break"];
+      const required = ["lenel", "bosh", "siyurim", "break"];
       if (achmashCount >= 2) required.push("cico");
       required.forEach(r => {
         if (!row.includes(r)) errs.push(`${gName}: חסר ${SL[r] || r}`);
@@ -129,11 +129,11 @@ function validateSched(sched, guards) {
     } else if (guard.isGate) {
       if (!row.includes("cico")) errs.push(`${gName}: חסר CICO`);
     } else {
-      ["lenel", "bosh", "cico", "malshinon", "break"].forEach(r => {
+      ["lenel", "bosh", "cico", "siyurim", "break"].forEach(r => {
         if (!row.includes(r)) errs.push(`${gName}: חסר ${SL[r] || r}`);
       });
     }
-    const restCnt = row.filter(s => s === "break" || s === "malshinon").length;
+    const restCnt = row.filter(s => s === "break" || s === "siyurim").length;
     if (restCnt > 3) errs.push(`${gName}: ${restCnt} שעות מנוחה (מקס׳ 3)`);
   });
   for (let h = 0; h < 8; h++) {
@@ -144,7 +144,7 @@ function validateSched(sched, guards) {
   if (nonGate.length > 1) {
     const restCounts = nonGate.map(({ i }) => {
       const row = sched.map(r => r[i]);
-      return row.filter(s => s === "break" || s === "malshinon").length;
+      return row.filter(s => s === "break" || s === "siyurim").length;
     });
     const mx = Math.max(...restCounts);
     const mn = Math.min(...restCounts);
@@ -213,31 +213,31 @@ function tryGen(seed, guards) {
     if (cands.length) sched[h][cands[0]] = "bosh";
   }
   for (const h of shuffle([0, 3, 4, 5, 6, 7])) {
-    if (sched[h].includes("malshinon")) continue;
+    if (sched[h].includes("siyurim")) continue;
     const cands = shuffle(Array.from({ length: N }, (_, i) => i)).filter(g => {
       if (!free(h, g) || needsBreak(h, g)) return false;
-      const curMals   = sched.map(r => r[g]).filter(s => s === "malshinon").length;
+      const curMals   = sched.map(r => r[g]).filter(s => s === "siyurim").length;
       const curBreaks = sched.map(r => r[g]).filter(s => s === "break").length;
       const emptySlots = sched.map(r => r[g]).filter(s => !s).length;
       return (curMals + 1) + curBreaks + (emptySlots - 1) <= 3;
     });
-    if (cands.length) sched[h][cands[0]] = "malshinon";
+    if (cands.length) sched[h][cands[0]] = "siyurim";
   }
   for (let h = 0; h < 8; h++) {
     for (let g = 0; g < N; g++) {
       if (sched[h][g]) continue;
       const hourBreakTaken = sched[h].some((s, gi) => gi !== g && s === "break");
-      const hourMalsTaken  = sched[h].some((s, gi) => gi !== g && s === "malshinon");
-      const prevMals       = h > 0 && sched[h - 1][g] === "malshinon";
+      const hourMalsTaken  = sched[h].some((s, gi) => gi !== g && s === "siyurim");
+      const prevMals       = h > 0 && sched[h - 1][g] === "siyurim";
       const prevBreak      = h > 0 && sched[h - 1][g] === "break";
-      const nextMals       = h < 7 && sched[h + 1][g] === "malshinon";
+      const nextMals       = h < 7 && sched[h + 1][g] === "siyurim";
       const malsValid = (h === 0 || h >= 3) && !prevMals && !nextMals && !hourMalsTaken;
       if (malsValid && prevBreak) {
-        sched[h][g] = "malshinon";
+        sched[h][g] = "siyurim";
       } else if (!hourBreakTaken && !prevBreak) {
         sched[h][g] = "break";
       } else if (malsValid) {
-        sched[h][g] = "malshinon";
+        sched[h][g] = "siyurim";
       } else {
         sched[h][g] = "break";
       }
@@ -254,10 +254,10 @@ function postFix(sched, guards) {
     const achmashCount = guards.filter(x => x.level === "achmash").length;
     for (let g = 0; g < guards.length && !improved; g++) {
       const needed = guards[g].level === "achmash"
-        ? (achmashCount >= 2 ? ["lenel", "bosh", "malshinon", "break", "cico"] : ["lenel", "bosh", "malshinon", "break"])
+        ? (achmashCount >= 2 ? ["lenel", "bosh", "siyurim", "break", "cico"] : ["lenel", "bosh", "siyurim", "break"])
         : guards[g].isGate
           ? ["cico"]
-          : ["lenel", "bosh", "malshinon", "cico", "break"];
+          : ["lenel", "bosh", "siyurim", "cico", "break"];
       for (const need of needed) {
         if (sched.map(r => r[g]).includes(need)) continue;
         for (let h = 0; h < 8; h++) {
@@ -281,8 +281,8 @@ function postFix(sched, guards) {
         const g = breakGuards[k];
         if (sched[h][g] === "shaar") continue;
         const prev = sched[h][g];
-        sched[h][g] = "malshinon";
-        if (canPlaceFix(h, g, "malshinon", sched, guards) &&
+        sched[h][g] = "siyurim";
+        if (canPlaceFix(h, g, "siyurim", sched, guards) &&
             validateSched(sched, guards).length < errs.length) {
           improved = true;
         } else {
@@ -292,16 +292,16 @@ function postFix(sched, guards) {
     }
 
     for (let g = 0; g < guards.length && !improved; g++) {
-      const restCnt = sched.map(r => r[g]).filter(s => s === "break" || s === "malshinon").length;
+      const restCnt = sched.map(r => r[g]).filter(s => s === "break" || s === "siyurim").length;
       if (restCnt <= 3) continue;
       for (let h = 0; h < 8 && !improved; h++) {
         const curSt = sched[h][g];
-        if (curSt !== "break" && curSt !== "malshinon") continue;
+        if (curSt !== "break" && curSt !== "siyurim") continue;
         for (let g2 = 0; g2 < guards.length && !improved; g2++) {
           if (g2 === g) continue;
           const st2 = sched[h][g2];
           if (!st2 || REST.has(st2)) continue;
-          const rested2 = sched.map(r => r[g2]).filter(s => s === "break" || s === "malshinon").length;
+          const rested2 = sched.map(r => r[g2]).filter(s => s === "break" || s === "siyurim").length;
           if (rested2 >= 3) continue;
           sched[h][g]  = st2;
           sched[h][g2] = curSt;
@@ -315,18 +315,18 @@ function postFix(sched, guards) {
     for (let g = 0; g < guards.length && !improved; g++) {
       for (let h = 1; h < 8 && !improved; h++) {
         if (sched[h][g] !== "break" || sched[h - 1][g] !== "break") continue;
-        if (assignable(h).includes("malshinon") &&
-            !sched[h].some((s, gi) => gi !== g && s === "malshinon") &&
-            !(h < 7 && sched[h + 1][g] === "malshinon")) {
-          sched[h][g] = "malshinon";
+        if (assignable(h).includes("siyurim") &&
+            !sched[h].some((s, gi) => gi !== g && s === "siyurim") &&
+            !(h < 7 && sched[h + 1][g] === "siyurim")) {
+          sched[h][g] = "siyurim";
           if (validateSched(sched, guards).length < errs.length) { improved = true; break; }
           sched[h][g] = "break";
         }
         if (!improved &&
-            assignable(h - 1).includes("malshinon") &&
-            !sched[h - 1].some((s, gi) => gi !== g && s === "malshinon") &&
-            !(h > 1 && sched[h - 2][g] === "malshinon")) {
-          sched[h - 1][g] = "malshinon";
+            assignable(h - 1).includes("siyurim") &&
+            !sched[h - 1].some((s, gi) => gi !== g && s === "siyurim") &&
+            !(h > 1 && sched[h - 2][g] === "siyurim")) {
+          sched[h - 1][g] = "siyurim";
           if (validateSched(sched, guards).length < errs.length) { improved = true; break; }
           sched[h - 1][g] = "break";
         }

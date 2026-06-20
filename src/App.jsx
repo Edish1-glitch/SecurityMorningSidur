@@ -106,17 +106,17 @@ const HOURS = [
 ];
 const SL = {
   cico: "CICO", lenel: "Lenel", bosh: "Bosh",
-  break: "הפסקה", malshinon: "מלשינון", shaar: "שער",
+  break: "הפסקה", siyurim: "סיורים", shaar: "שער",
 };
 const SC = {
   cico:      { bg: "#1a3a4a", text: "#7dd3fc", border: "#0ea5e9" },
   lenel:     { bg: "#1a2f1a", text: "#86efac", border: "#3fb950" },
   bosh:      { bg: "#2a1f3a", text: "#d8b4fe", border: "#bc8cff" },
   break:     { bg: "#3a2a10", text: "#fcd34d", border: "#f0a500" },
-  malshinon: { bg: "#1a2535", text: "#93c5fd", border: "#58a6ff" },
+  siyurim: { bg: "#1a2535", text: "#93c5fd", border: "#58a6ff" },
   shaar:     { bg: "#2a1515", text: "#fca5a5", border: "#f85149" },
 };
-const REST = new Set(["break", "malshinon", "shaar"]);
+const REST = new Set(["break", "siyurim", "shaar"]);
 
 // ─── Scheduling Logic ─────────────────────────────────────────────────────────
 function mulberry32(seed) {
@@ -132,11 +132,11 @@ function mulberry32(seed) {
 function assignable(h, cfg = {}) {
   const s = ["lenel", "bosh", "break"];
   if (h > 0 && !cfg.cicoDown) s.push("cico");
-  // Malshinon: all hours when gate+CICO both down; otherwise normal schedule (07, 10–14)
+  // Siyurim: all hours when gate+CICO both down; otherwise normal schedule (07, 10–14)
   if (cfg.gateDown && cfg.cicoDown) {
-    s.push("malshinon"); // gate+CICO both down → malshinon covers all hours
+    s.push("siyurim"); // gate+CICO both down → siyurim covers all hours
   } else {
-    if (h === 0 || h >= 3) s.push("malshinon"); // normal (regardless of gateDown alone)
+    if (h === 0 || h >= 3) s.push("siyurim"); // normal (regardless of gateDown alone)
   }
   if (!cfg.gateDown && h <= 2) s.push("shaar");
   return s;
@@ -195,8 +195,8 @@ function canPlaceFix(h, g, st, sched, guards, cfg = {}) {
     const cnt = sched.map(r => r[g]).filter(s => s === "cico").length;
     if (cnt >= cicoLimit(g, guards)) return false;
   }
-  if (st === "malshinon" && h > 0 && sched[h - 1][g] === "malshinon") return false;
-  if (st === "malshinon" && h < 7 && sched[h + 1][g] === "malshinon") return false;
+  if (st === "siyurim" && h > 0 && sched[h - 1][g] === "siyurim") return false;
+  if (st === "siyurim" && h < 7 && sched[h + 1][g] === "siyurim") return false;
   if (st === "break" && h > 0 && sched[h - 1][g] === "break") return false;
   if (sched[h].some((s, gi) => gi !== g && s === st)) return false;
   return true;
@@ -241,15 +241,15 @@ function validateSched(sched, guards, cfg = {}) {
       if (!anotherDoubleHasCico) errs.push(`${gName}: כפולה חייב CICO בשעה האחרונה`);
     }
     for (let h = 0; h < 7; h++) {
-      if (row[h] === "malshinon" && row[h + 1] === "malshinon")
-        errs.push(`${gName}: מלשינון רצוף@${HOURS[h]}`);
+      if (row[h] === "siyurim" && row[h + 1] === "siyurim")
+        errs.push(`${gName}: סיורים רצוף@${HOURS[h]}`);
     }
 
-    // Required stations per guard (shortage mode relaxes malshinon requirement)
+    // Required stations per guard (shortage mode relaxes siyurim requirement)
     if (guard.level === "achmash") {
       const required = ["lenel", "bosh", "break"];
       if (achmashCount >= 2 && !cfg.cicoDown) required.push("cico");
-      if (!cfg.isShortage) required.push("malshinon");
+      if (!cfg.isShortage) required.push("siyurim");
       required.forEach(r => {
         if (!row.includes(r)) errs.push(`${gName}: חסר ${SL[r] || r}`);
       });
@@ -258,7 +258,7 @@ function validateSched(sched, guards, cfg = {}) {
     } else {
       const required = ["lenel", "bosh", "break"];
       if (!cfg.cicoDown) required.push("cico");
-      if (!cfg.isShortage) required.push("malshinon");
+      if (!cfg.isShortage) required.push("siyurim");
       required.forEach(r => {
         if (!row.includes(r)) errs.push(`${gName}: חסר ${SL[r] || r}`);
       });
@@ -266,7 +266,7 @@ function validateSched(sched, guards, cfg = {}) {
 
     // In shortage mode the rest cap is omitted — fewer guards means more rest is unavoidable.
     // The balance check (below) ensures fairness between guards.
-    const restCnt = row.filter(s => s === "break" || s === "malshinon").length;
+    const restCnt = row.filter(s => s === "break" || s === "siyurim").length;
     if (!cfg.isShortage && restCnt > maxRest)
       errs.push(`${gName}: ${restCnt} שעות מנוחה (מקס׳ ${maxRest})`);
   });
@@ -280,7 +280,7 @@ function validateSched(sched, guards, cfg = {}) {
   if (nonGate.length > 1) {
     const restCounts = nonGate.map(({ i }) => {
       const row = sched.map(r => r[i]);
-      return row.filter(s => s === "break" || s === "malshinon").length;
+      return row.filter(s => s === "break" || s === "siyurim").length;
     });
     const mx = Math.max(...restCounts);
     const mn = Math.min(...restCounts);
@@ -379,22 +379,22 @@ function tryGen(seed, guards, cfg = {}) {
     if (cands.length) sched[h][cands[0]] = "bosh";
   }
 
-  // Malshinon — all hours when gate+CICO both down; otherwise normal (07, 10–14)
+  // Siyurim — all hours when gate+CICO both down; otherwise normal (07, 10–14)
   const malsHours = (cfg.gateDown && cfg.cicoDown)
     ? [0, 1, 2, 3, 4, 5, 6, 7]
     : [0, 3, 4, 5, 6, 7];
 
   const maxRest = cfg.maxRest || 3;
   for (const h of shuffle(malsHours)) {
-    if (sched[h].includes("malshinon")) continue;
+    if (sched[h].includes("siyurim")) continue;
     const cands = shuffle(Array.from({ length: N }, (_, i) => i)).filter(g => {
       if (!free(h, g) || needsBreak(h, g)) return false;
-      const curMals   = sched.map(r => r[g]).filter(s => s === "malshinon").length;
+      const curMals   = sched.map(r => r[g]).filter(s => s === "siyurim").length;
       const curBreaks = sched.map(r => r[g]).filter(s => s === "break").length;
       const emptySlots = sched.map(r => r[g]).filter(s => !s).length;
       return (curMals + 1) + curBreaks + (emptySlots - 1) <= maxRest;
     });
-    if (cands.length) sched[h][cands[0]] = "malshinon";
+    if (cands.length) sched[h][cands[0]] = "siyurim";
   }
 
   // Fill remaining empty slots
@@ -402,17 +402,17 @@ function tryGen(seed, guards, cfg = {}) {
     for (let g = 0; g < N; g++) {
       if (sched[h][g]) continue;
       const hourBreakTaken = sched[h].some((s, gi) => gi !== g && s === "break");
-      const hourMalsTaken  = sched[h].some((s, gi) => gi !== g && s === "malshinon");
-      const prevMals       = h > 0 && sched[h - 1][g] === "malshinon";
+      const hourMalsTaken  = sched[h].some((s, gi) => gi !== g && s === "siyurim");
+      const prevMals       = h > 0 && sched[h - 1][g] === "siyurim";
       const prevBreak      = h > 0 && sched[h - 1][g] === "break";
-      const nextMals       = h < 7 && sched[h + 1][g] === "malshinon";
+      const nextMals       = h < 7 && sched[h + 1][g] === "siyurim";
       const malsValid = malsHours.includes(h) && !prevMals && !nextMals && !hourMalsTaken;
       if (malsValid && prevBreak) {
-        sched[h][g] = "malshinon";
+        sched[h][g] = "siyurim";
       } else if (!hourBreakTaken && !prevBreak) {
         sched[h][g] = "break";
       } else if (malsValid) {
-        sched[h][g] = "malshinon";
+        sched[h][g] = "siyurim";
       } else {
         sched[h][g] = "break";
       }
@@ -435,13 +435,13 @@ function postFix(sched, guards, cfg = {}) {
       if (guards[g].level === "achmash") {
         needed = ["lenel", "bosh", "break"];
         if (achmashCount >= 2 && !cfg.cicoDown) needed.push("cico");
-        if (!cfg.isShortage) needed.push("malshinon");
+        if (!cfg.isShortage) needed.push("siyurim");
       } else if (guards[g].isGate) {
         needed = cfg.cicoDown ? [] : ["cico"];
       } else {
         needed = ["lenel", "bosh", "break"];
         if (!cfg.cicoDown) needed.push("cico");
-        if (!cfg.isShortage) needed.push("malshinon");
+        if (!cfg.isShortage) needed.push("siyurim");
       }
       for (const need of needed) {
         if (sched.map(r => r[g]).includes(need)) continue;
@@ -459,7 +459,7 @@ function postFix(sched, guards, cfg = {}) {
       }
     }
 
-    // Pass 2: fix simultaneous breaks → swap to malshinon
+    // Pass 2: fix simultaneous breaks → swap to siyurim
     for (let h = 0; h < 8 && !improved; h++) {
       const breakGuards = sched[h].map((s, gi) => gi).filter(gi => sched[h][gi] === "break");
       if (breakGuards.length <= 1) continue;
@@ -467,8 +467,8 @@ function postFix(sched, guards, cfg = {}) {
         const g = breakGuards[k];
         if (sched[h][g] === "shaar") continue;
         const prev = sched[h][g];
-        sched[h][g] = "malshinon";
-        if (canPlaceFix(h, g, "malshinon", sched, guards, cfg) &&
+        sched[h][g] = "siyurim";
+        if (canPlaceFix(h, g, "siyurim", sched, guards, cfg) &&
             validateSched(sched, guards, cfg).length < errs.length) {
           improved = true;
         } else {
@@ -479,16 +479,16 @@ function postFix(sched, guards, cfg = {}) {
 
     // Pass 3: fix rest-limit violations via swap
     for (let g = 0; g < guards.length && !improved; g++) {
-      const restCnt = sched.map(r => r[g]).filter(s => s === "break" || s === "malshinon").length;
+      const restCnt = sched.map(r => r[g]).filter(s => s === "break" || s === "siyurim").length;
       if (restCnt <= maxRest) continue;
       for (let h = 0; h < 8 && !improved; h++) {
         const curSt = sched[h][g];
-        if (curSt !== "break" && curSt !== "malshinon") continue;
+        if (curSt !== "break" && curSt !== "siyurim") continue;
         for (let g2 = 0; g2 < guards.length && !improved; g2++) {
           if (g2 === g) continue;
           const st2 = sched[h][g2];
           if (!st2 || REST.has(st2)) continue;
-          const rested2 = sched.map(r => r[g2]).filter(s => s === "break" || s === "malshinon").length;
+          const rested2 = sched.map(r => r[g2]).filter(s => s === "break" || s === "siyurim").length;
           if (rested2 >= maxRest) continue;
           sched[h][g]  = st2;
           sched[h][g2] = curSt;
@@ -499,22 +499,22 @@ function postFix(sched, guards, cfg = {}) {
       }
     }
 
-    // Pass 4: fix consecutive breaks → replace with malshinon
+    // Pass 4: fix consecutive breaks → replace with siyurim
     for (let g = 0; g < guards.length && !improved; g++) {
       for (let h = 1; h < 8 && !improved; h++) {
         if (sched[h][g] !== "break" || sched[h - 1][g] !== "break") continue;
-        if (assignable(h, cfg).includes("malshinon") &&
-            !sched[h].some((s, gi) => gi !== g && s === "malshinon") &&
-            !(h < 7 && sched[h + 1][g] === "malshinon")) {
-          sched[h][g] = "malshinon";
+        if (assignable(h, cfg).includes("siyurim") &&
+            !sched[h].some((s, gi) => gi !== g && s === "siyurim") &&
+            !(h < 7 && sched[h + 1][g] === "siyurim")) {
+          sched[h][g] = "siyurim";
           if (validateSched(sched, guards, cfg).length < errs.length) { improved = true; break; }
           sched[h][g] = "break";
         }
         if (!improved &&
-            assignable(h - 1, cfg).includes("malshinon") &&
-            !sched[h - 1].some((s, gi) => gi !== g && s === "malshinon") &&
-            !(h > 1 && sched[h - 2][g] === "malshinon")) {
-          sched[h - 1][g] = "malshinon";
+            assignable(h - 1, cfg).includes("siyurim") &&
+            !sched[h - 1].some((s, gi) => gi !== g && s === "siyurim") &&
+            !(h > 1 && sched[h - 2][g] === "siyurim")) {
+          sched[h - 1][g] = "siyurim";
           if (validateSched(sched, guards, cfg).length < errs.length) { improved = true; break; }
           sched[h - 1][g] = "break";
         }
@@ -559,7 +559,7 @@ function generate(guards, cfg = {}) {
   };
 
   // In shortage mode: no hard rest cap (validateSched skips it).
-  // Use a high maxRest so tryGen doesn't over-constrain malshinon assignment.
+  // Use a high maxRest so tryGen doesn't over-constrain siyurim assignment.
   // Fairness is enforced by the balance check in validateSched.
   if (cfg.isShortage) {
     const r = tryWith(8);
@@ -789,11 +789,11 @@ function ShortagePanel({ absentGuard, absentIdx, totalGuards, gateDown, cicoDown
   const absentName = guardDisplayName(absentGuard, absentIdx, totalGuards);
 
   const infoText = gateDown && cicoDown
-    ? "מלשינון פעיל בכל שעות המשמרת · Lenel ו-Bosh בלבד"
+    ? "סיורים פעיל בכל שעות המשמרת · Lenel ו-Bosh בלבד"
     : gateDown
-      ? "שוער ירד · מלשינון כרגיל (07, 10–14) · CICO, Lenel, Bosh פעילים"
+      ? "שוער ירד · סיורים כרגיל (07, 10–14) · CICO, Lenel, Bosh פעילים"
       : cicoDown
-        ? "CICO ירד · שאר העמדות פעילות · מלשינון כרגיל"
+        ? "CICO ירד · שאר העמדות פעילות · סיורים כרגיל"
         : "כל העמדות פעילות · 4 שומרים פעילים";
 
   return (
@@ -1609,17 +1609,17 @@ export default function App() {
             <div className="px-3 pb-3" style={{ direction: "rtl" }}>
               {[
                 "CICO לא פעיל 07–08",
-                "מלשינון לא פעיל 08–10",
+                "סיורים לא פעיל 08–10",
                 "שער 07–10 בלבד",
                 "מקס׳ 3 שעות ברצף",
                 "אחרי CICO → הפסקה חובה",
                 "אחמ״ש: ללא CICO",
                 "CICO מתחלק שווה",
                 "כפולה: CICO בשעה האחרונה",
-                "אין מלשינון רצוף",
+                "אין סיורים רצוף",
                 "אין כפילויות",
                 "איזון הפסקות (פער מקס׳ 1)",
-                "חוסר: מלשינון עובר ל-07–10 כששער יורד",
+                "חוסר: סיורים עובר ל-07–10 כששער יורד",
               ].map((rule, i) => (
                 <div key={i} className="flex items-center gap-1.5 py-0.5">
                   <span className="text-xs">✅</span>

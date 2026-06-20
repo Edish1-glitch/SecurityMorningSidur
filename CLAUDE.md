@@ -60,13 +60,13 @@ Each guard object: `{ name, level, isGate, isDouble, isAbsent }`
 
 - Uses `mulberry32` seeded PRNG; tries up to 3000 seeds, keeps the best result
 - `cfg` object: `{ gateDown, cicoDown, isShortage, maxRest }`
-- Station assignment order in `tryGen`: gate/double pre-fill → CICO → Lenel → Bosh → Malshinon → fill remaining
+- Station assignment order in `tryGen`: gate/double pre-fill → CICO → Lenel → Bosh → Siyurim → fill remaining
 - `postFix` runs up to 20 improvement passes (5 pass types) to reduce validation errors
-- In shortage mode (`isShortage: true`), malshinon requirement is relaxed and rest cap is removed (fairness enforced by balance check instead)
+- In shortage mode (`isShortage: true`), siyurim requirement is relaxed and rest cap is removed (fairness enforced by balance check instead)
 
 ### Shortage Mode Station Logic
 
-| gateDown | cicoDown | Malshinon hours | Active stations |
+| gateDown | cicoDown | Siyurim hours | Active stations |
 |----------|----------|-----------------|-----------------|
 | false | false | 07, 10–14 | all |
 | true | false | 07, 10–14 | no שוער |
@@ -134,8 +134,8 @@ export { generate, validateSched, tryGen, postFix, cicoLimit, mulberry32, assign
 
 ```js
 // Stations
-SL = { cico, lenel, bosh, break, malshinon, shaar }
-REST = new Set(["break", "malshinon", "shaar"])  // non-active stations
+SL = { cico, lenel, bosh, break, siyurim, shaar }
+REST = new Set(["break", "siyurim", "shaar"])  // non-active stations
 
 // תקן strings
 TAKKEN_FULL    = "מלא"
