@@ -680,9 +680,12 @@ function Legend() {
   );
 }
 
-function GuardSetup({ guards, setGuards }) {
+function GuardSetup({ guards, setGuards, armed, setArmed }) {
   const updateGuard = (i, field, val) =>
     setGuards(prev => prev.map((g, idx) => idx === i ? { ...g, [field]: val } : g));
+
+  const updateArmed = (i, val) =>
+    setArmed(prev => prev.map((a, idx) => idx === i ? { ...a, name: val } : a));
 
   const toggleAbsent = (i) =>
     setGuards(prev => prev.map((g, idx) => ({
@@ -780,6 +783,34 @@ function GuardSetup({ guards, setGuards }) {
           </div>
         </div>
       ))}
+
+      {/* Armed guards (חמושים) — not part of the schedule, only the attendance report */}
+      <div className="mt-3 pt-3" style={{ borderTop: "1px dashed #30363d" }}>
+        <div className="text-xs font-medium mb-2 text-center" style={{ color: "#8b949e" }}>
+          חמושים · לא נכנסים לסידור
+        </div>
+        {armed.map((a, i) => (
+          <div
+            key={i}
+            className="rounded-xl p-3 mb-2 flex items-center gap-3"
+            style={{ backgroundColor: "#1c2330", border: "1px solid #30363d" }}
+          >
+            <span
+              className="rounded-md px-2 py-1 text-xs font-bold flex-shrink-0"
+              style={{ backgroundColor: "#f0a50018", border: "1px solid #f0a500", color: "#f0a500" }}
+            >
+              🔫 חמוש {i + 1}
+            </span>
+            <input
+              className="flex-1 text-center font-bold pb-1 bg-transparent outline-none"
+              style={{ color: "#e6edf3", borderBottom: "1px solid #30363d", fontSize: 16 }}
+              value={a.name}
+              onChange={e => updateArmed(i, e.target.value)}
+              placeholder={`חמוש ${i + 1}`}
+            />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1252,7 +1283,7 @@ function FullscreenTable({ sched, guards, onClose }) {
 const TAKKEN_FULL    = "מלא";
 const TAKKEN_SHORTAGE = "חוסר מאבטח לא חמוש בין 07:00–15:00";
 
-function AttendanceReport({ guards, isShortage, profile }) {
+function AttendanceReport({ guards, isShortage, profile, armed = [] }) {
   const ROLE_OPTIONS = ["מאבטח", "מאבטחת", "חמוש"];
   const DAYS_HE      = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
   const shift        = "בוקר";
@@ -1296,8 +1327,8 @@ function AttendanceReport({ guards, isShortage, profile }) {
       `*צוות 3:* (${totalCount})`,
       `*1.* ${profileName} - (${profile.role || 'אחמ"ש'})`,
       ...guardLines,
-      `*${guards.length + 2}.* _____________ - (חמוש)`,
-      `*${guards.length + 3}.* _____________ - (חמוש)`,
+      `*${guards.length + 2}.* ${armed[0]?.name || "_____________"} - (חמוש)`,
+      `*${guards.length + 3}.* ${armed[1]?.name || "_____________"} - (חמוש)`,
       ``,
       `תקן: ${status}`,
     ].join("\n");
@@ -1378,6 +1409,27 @@ function AttendanceReport({ guards, isShortage, profile }) {
                 >
                   {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
                 </select>
+              </div>
+            ))}
+
+            {/* Armed guards — locked role "חמוש" */}
+            {armed.map((a, i) => (
+              <div key={`armed-${i}`} className="flex items-center gap-2 mb-1.5">
+                <span className="text-xs font-bold flex-1 truncate" style={{ color: a.name ? "#e6edf3" : "#555" }}>
+                  {a.name || `חמוש ${i + 1}`}
+                </span>
+                <span
+                  className="rounded-lg px-2 py-1.5 text-xs font-medium text-center"
+                  style={{
+                    backgroundColor: "#f0a50018",
+                    border: "1px solid #f0a500",
+                    color: "#f0a500",
+                    minWidth: 100,
+                    display: "inline-block",
+                  }}
+                >
+                  חמוש
+                </span>
               </div>
             ))}
           </div>
@@ -1476,6 +1528,7 @@ export default function App() {
   }, []);
 
   const [guards, setGuards] = useState(DEFAULT_GUARDS.map(g => ({ ...g })));
+  const [armed, setArmed] = useState([{ name: "" }, { name: "" }]);
   const [sched, setSched] = useState(null);
   const [errors, setErrors] = useState([]);
   const [generating, setGenerating] = useState(false);
@@ -1634,7 +1687,7 @@ export default function App() {
         <ProfileSection profile={profile} onChange={handleProfileChange} />
 
         {/* Guard Setup */}
-        <GuardSetup guards={guards} setGuards={setGuards} />
+        <GuardSetup guards={guards} setGuards={setGuards} armed={armed} setArmed={setArmed} />
 
         {/* Shortage Panel (shown when exactly 1 guard is absent) */}
         {isShortage && (
@@ -1712,7 +1765,7 @@ export default function App() {
         {sched && <ValidationPanel errors={errors} isShortage={isShortage} />}
 
         {/* Attendance Report */}
-        {sched && <AttendanceReport guards={displayGuards} isShortage={isShortage} profile={profile} />}
+        {sched && <AttendanceReport guards={displayGuards} isShortage={isShortage} profile={profile} armed={armed} />}
 
         {/* Share */}
         {sched && (
