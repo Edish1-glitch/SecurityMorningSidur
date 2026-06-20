@@ -793,7 +793,7 @@ function GuardSetup({ guards, setGuards, armed, setArmed }) {
           <div
             key={i}
             className="rounded-xl p-3 mb-2 flex items-center gap-3"
-            style={{ backgroundColor: "#1c2330", border: "1px solid #30363d" }}
+            style={{ backgroundColor: "#1c2330", border: "1px solid #30363d", overflow: "hidden" }}
           >
             <span
               className="rounded-md px-2 py-1 text-xs font-bold flex-shrink-0"
@@ -803,7 +803,7 @@ function GuardSetup({ guards, setGuards, armed, setArmed }) {
             </span>
             <input
               className="flex-1 text-center font-bold pb-1 bg-transparent outline-none"
-              style={{ color: "#e6edf3", borderBottom: "1px solid #30363d", fontSize: 16 }}
+              style={{ color: "#e6edf3", borderBottom: "1px solid #30363d", fontSize: 16, minWidth: 0, width: "100%" }}
               value={a.name}
               onChange={e => updateArmed(i, e.target.value)}
               placeholder={`חמוש ${i + 1}`}
